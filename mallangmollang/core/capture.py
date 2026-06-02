@@ -7,7 +7,6 @@ import time
 from dataclasses import dataclass
 
 import mss
-import mss.tools
 from PIL import Image
 
 

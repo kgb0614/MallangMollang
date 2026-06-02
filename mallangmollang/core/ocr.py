@@ -60,7 +60,8 @@ class OcrEngine:
         if preprocess:
             processed = self._preprocess(image)
         else:
-            processed = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+            img = np.array(image)
+            processed = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if len(img.shape) == 3 else img
 
         # Tesseract data → 개별 단어 단위 바운딩 박스 + 신뢰도
         data = pytesseract.image_to_data(
