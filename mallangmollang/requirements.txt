@@ -1,0 +1,8 @@
+PyQt6>=6.6
+pytesseract>=0.3
+Pillow>=10.0
+opencv-python>=4.8
+httpx>=0.25
+imagehash>=4.3
+pynput>=1.7
+cryptography>=41.0
