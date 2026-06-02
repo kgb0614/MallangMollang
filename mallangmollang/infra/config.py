@@ -20,6 +20,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "gemini": {
             "api_key": "",
             "model": "gemini-2.0-flash",
+            "endpoint": "ai_studio",      # "ai_studio" 또는 "vertex"
+            "vertex": {
+                "project_id": "",
+                "region": "us-central1",
+                # 서비스 계정 JSON 내용(문자열) 또는 .json 파일 경로
+                "service_account": "",
+            },
         },
         "openai": {
             "api_key": "",

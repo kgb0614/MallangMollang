@@ -1,20 +1,25 @@
 """
 Google Gemini API 프로바이더
-httpx를 사용한 비동기 REST 방식으로 구현합니다.
+AI Studio (API 키)와 Vertex AI (서비스 계정) 두 엔드포인트를 모두 지원합니다.
 """
 
 import base64
 import io
+import json
+import time
+from pathlib import Path
 from typing import Any
 
 import httpx
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from PIL import Image
 
 from .base import BaseProvider, TranslateParams, TranslationResult
 
 
-# Gemini REST API 기본 URL
-_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+# AI Studio REST API 기본 URL
+_AI_STUDIO_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 # Vision을 지원하는 모델 목록
 _VISION_MODELS = {
@@ -27,11 +32,35 @@ _VISION_MODELS = {
 
 
 class GeminiProvider(BaseProvider):
-    """Google Gemini API 프로바이더 구현체"""
+    """
+    Google Gemini API 프로바이더 구현체
 
-    def __init__(self, api_key: str = "", model: str = "gemini-2.0-flash"):
+    endpoint="ai_studio": API 키로 AI Studio 호출
+    endpoint="vertex": 서비스 계정 JSON으로 Vertex AI 호출
+    """
+
+    def __init__(
+        self,
+        api_key: str = "",
+        model: str = "gemini-2.0-flash",
+        endpoint: str = "ai_studio",
+        vertex_project_id: str = "",
+        vertex_region: str = "us-central1",
+        service_account: str = "",
+    ):
         super().__init__(api_key=api_key, model=model)
+        self.endpoint = endpoint
+        self.vertex_project_id = vertex_project_id
+        self.vertex_region = vertex_region
         self._client: httpx.AsyncClient | None = None
+
+        # Vertex AI 인증 관련
+        self._service_account_info: dict | None = None
+        self._access_token: str = ""
+        self._token_expires_at: float = 0.0
+
+        if endpoint == "vertex" and service_account:
+            self._service_account_info = _load_service_account(service_account)
 
     @property
     def name(self) -> str:
@@ -79,7 +108,7 @@ class GeminiProvider(BaseProvider):
         )
 
     async def test_connection(self) -> bool:
-        """API 키가 유효한지 간단한 요청으로 확인합니다."""
+        """API 연결이 유효한지 간단한 요청으로 확인합니다."""
         try:
             payload = _build_text_payload("안녕", TranslateParams(max_tokens=10))
             await self._request(payload)
@@ -101,25 +130,127 @@ class GeminiProvider(BaseProvider):
 
     async def _request(self, payload: dict[str, Any]) -> str:
         """
-        Gemini generateContent API를 호출하고 텍스트 응답을 반환합니다.
+        엔드포인트에 따라 AI Studio 또는 Vertex AI로 요청합니다.
 
         Raises:
             httpx.HTTPStatusError: API 오류 응답
-            ValueError: 응답 파싱 실패
+            ValueError: 응답 파싱 실패 또는 설정 오류
         """
-        url = f"{_BASE_URL}/models/{self.model}:generateContent?key={self.api_key}"
-
         client = await self._get_client()
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
 
+        if self.endpoint == "vertex":
+            url, headers = await self._build_vertex_request()
+            response = await client.post(url, json=payload, headers=headers)
+        else:
+            url = f"{_AI_STUDIO_URL}/models/{self.model}:generateContent?key={self.api_key}"
+            response = await client.post(url, json=payload)
+
+        response.raise_for_status()
         data = response.json()
 
-        # 응답 구조: candidates[0].content.parts[0].text
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"].strip()
         except (KeyError, IndexError) as e:
             raise ValueError(f"Gemini 응답 파싱 실패: {e}\n응답: {data}") from e
+
+    # ── Vertex AI 인증 ──
+
+    async def _build_vertex_request(self) -> tuple[str, dict[str, str]]:
+        """Vertex AI용 URL과 인증 헤더를 구성합니다."""
+        if not self._service_account_info:
+            raise ValueError("Vertex AI를 사용하려면 서비스 계정 JSON이 필요합니다.")
+        if not self.vertex_project_id:
+            raise ValueError("Vertex AI를 사용하려면 프로젝트 ID가 필요합니다.")
+
+        token = await self._get_access_token()
+        url = (
+            f"https://{self.vertex_region}-aiplatform.googleapis.com/v1"
+            f"/projects/{self.vertex_project_id}"
+            f"/locations/{self.vertex_region}"
+            f"/publishers/google/models/{self.model}:generateContent"
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        return url, headers
+
+    async def _get_access_token(self) -> str:
+        """OAuth2 액세스 토큰을 가져옵니다 (캐시, 만료 시 자동 갱신)."""
+        if self._access_token and time.time() < self._token_expires_at - 60:
+            return self._access_token
+
+        jwt_token = _create_signed_jwt(self._service_account_info)
+
+        client = await self._get_client()
+        response = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": jwt_token,
+            },
+        )
+        response.raise_for_status()
+        token_data = response.json()
+
+        self._access_token = token_data["access_token"]
+        self._token_expires_at = time.time() + token_data.get("expires_in", 3600)
+        return self._access_token
+
+
+# ── 헬퍼 함수들 ──
+
+def _load_service_account(source: str) -> dict:
+    """
+    서비스 계정 JSON을 로드합니다.
+    source가 파일 경로면 파일을 읽고, JSON 문자열이면 바로 파싱합니다.
+    """
+    source = source.strip()
+
+    # { 로 시작하면 JSON 내용으로 판단
+    if source.startswith("{"):
+        try:
+            return json.loads(source)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"서비스 계정 JSON 파싱 실패: {e}") from e
+
+    # 아니면 파일 경로로 판단
+    path = Path(source)
+    if not path.exists():
+        raise FileNotFoundError(f"서비스 계정 파일을 찾을 수 없습니다: {source}")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"서비스 계정 파일 파싱 실패: {e}") from e
+
+
+def _create_signed_jwt(sa_info: dict) -> str:
+    """서비스 계정 정보로 서명된 JWT를 생성합니다 (OAuth2 토큰 교환용)."""
+    now = int(time.time())
+
+    header = {"alg": "RS256", "typ": "JWT"}
+    claims = {
+        "iss": sa_info["client_email"],
+        "sub": sa_info["client_email"],
+        "aud": "https://oauth2.googleapis.com/token",
+        "iat": now,
+        "exp": now + 3600,
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+    }
+
+    # base64url 인코딩 (패딩 제거)
+    segments = [
+        base64.urlsafe_b64encode(json.dumps(header).encode()).rstrip(b"="),
+        base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"="),
+    ]
+    signing_input = b".".join(segments)
+
+    # RS256 서명
+    private_key = serialization.load_pem_private_key(
+        sa_info["private_key"].encode(),
+        password=None,
+    )
+    signature = private_key.sign(signing_input, asym_padding.PKCS1v15(), hashes.SHA256())
+    segments.append(base64.urlsafe_b64encode(signature).rstrip(b"="))
+
+    return b".".join(segments).decode()
 
 
 def _build_text_payload(prompt: str, params: TranslateParams) -> dict[str, Any]:
@@ -134,7 +265,6 @@ def _build_text_payload(prompt: str, params: TranslateParams) -> dict[str, Any]:
         },
     }
 
-    # 시스템 지시사항이 있으면 추가
     if params.system_hint:
         payload["systemInstruction"] = {"parts": [{"text": params.system_hint}]}
 
