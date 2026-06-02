@@ -4,7 +4,7 @@ LLM 프로바이더 추상 인터페이스
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from PIL import Image
 
 

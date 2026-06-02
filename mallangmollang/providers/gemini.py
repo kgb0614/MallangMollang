@@ -5,7 +5,6 @@ httpx를 사용한 비동기 REST 방식으로 구현합니다.
 
 import base64
 import io
-import json
 from typing import Any
 
 import httpx
@@ -32,6 +31,7 @@ class GeminiProvider(BaseProvider):
 
     def __init__(self, api_key: str = "", model: str = "gemini-2.0-flash"):
         super().__init__(api_key=api_key, model=model)
+        self._client: httpx.AsyncClient | None = None
 
     @property
     def name(self) -> str:
@@ -87,6 +87,18 @@ class GeminiProvider(BaseProvider):
         except Exception:
             return False
 
+    async def _get_client(self) -> httpx.AsyncClient:
+        """httpx 클라이언트를 재사용합니다 (연결 풀 유지)."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=60.0)
+        return self._client
+
+    async def close(self):
+        """HTTP 클라이언트를 닫습니다. 앱 종료 시 호출하세요."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+
     async def _request(self, payload: dict[str, Any]) -> str:
         """
         Gemini generateContent API를 호출하고 텍스트 응답을 반환합니다.
@@ -97,9 +109,9 @@ class GeminiProvider(BaseProvider):
         """
         url = f"{_BASE_URL}/models/{self.model}:generateContent?key={self.api_key}"
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
+        client = await self._get_client()
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
 
         data = response.json()
 
