@@ -239,13 +239,13 @@ def _parse_response(response: str, fallback_source: str = "") -> tuple[str, str]
     corrected = ""
     translated = ""
 
-    # [corrected]: ... 패턴 매칭
-    match_c = re.search(r"\[corrected\]\s*:\s*(.+)", response)
+    # [corrected]: ... 패턴 매칭 (대소문자 무관, 이후 줄도 다음 태그 전까지 포함)
+    match_c = re.search(r"\[corrected\]\s*:\s*(.+?)(?=\[translated\]|\Z)", response, re.IGNORECASE | re.DOTALL)
     if match_c:
         corrected = match_c.group(1).strip()
 
-    # [translated]: ... 패턴 매칭
-    match_t = re.search(r"\[translated\]\s*:\s*(.+)", response)
+    # [translated]: ... 패턴 매칭 (대소문자 무관, 끝까지 전부 포함)
+    match_t = re.search(r"\[translated\]\s*:\s*(.+)", response, re.IGNORECASE | re.DOTALL)
     if match_t:
         translated = match_t.group(1).strip()
 
