@@ -10,6 +10,8 @@ from typing import Callable
 from PIL import Image
 
 from mallangmollang.core.capture import ScreenCapture, CaptureResult
+from mallangmollang.core.detector import ChangeDetector
+from mallangmollang.core.cache import TranslationCache
 from mallangmollang.core.ocr import OcrEngine, OcrResult
 from mallangmollang.core.translator import Translator
 from mallangmollang.infra.config import Config
@@ -49,15 +51,15 @@ class Pipeline:
         ocr: OcrEngine,
         translator: Translator,
         config: Config,
-        detector=None,
-        cache=None,
+        detector: ChangeDetector | None = None,
+        cache: TranslationCache | None = None,
     ):
         self.capture = capture
         self.ocr = ocr
         self.translator = translator
         self.config = config
-        self.detector = detector  # Unit 4
-        self.cache = cache        # Unit 4
+        self.detector = detector
+        self.cache = cache
 
         self._running = False
         self._on_result: OnResultCallback | None = None
@@ -80,6 +82,12 @@ class Pipeline:
             ocr=OcrEngine(),
             translator=translator,
             config=config,
+            detector=ChangeDetector(
+                threshold=config.get("detector.hash_threshold", 5)
+            ),
+            cache=TranslationCache(
+                max_size=config.get("cache.max_size", 100)
+            ),
         )
 
     def on_result(self, callback: OnResultCallback):
@@ -102,15 +110,22 @@ class Pipeline:
 
         capture_result = self.capture.capture_region(region)
 
-        # 2. 변경 감지 (Unit 4에서 구현)
-        # if self.detector and not self.detector.has_changed(capture_result):
-        #     return PipelineResult(capture=capture_result, ocr=None, translation=None, skipped=True)
+        # 2. 변경 감지 — 변경 없으면 이후 파이프라인 전체 스킵 (PRD F2-1)
+        if self.detector:
+            det = self.detector.detect(capture_result)
+            if not det.changed:
+                return PipelineResult(
+                    capture=capture_result,
+                    ocr=None,
+                    translation=None,
+                    skipped=True,
+                )
 
         # 3. 번역 경로 분기
         vision_mode = self.config.get("translation.vision_mode", False)
 
         if vision_mode:
-            # 경로 B: Vision — OCR 건너뛰고 이미지 직접 전달
+            # 경로 B: Vision — OCR 건너뛰고 이미지 직접 전달 (PRD F5-5)
             translation = await self.translator.translate_vision(capture_result.image)
             pipeline_result = PipelineResult(
                 capture=capture_result,
@@ -131,14 +146,29 @@ class Pipeline:
                     skipped=True,
                 )
 
-            # 4. 캐시 확인 (Unit 4에서 구현)
-            # if self.cache:
-            #     cached = self.cache.lookup(ocr_result.text)
-            #     if cached:
-            #         return PipelineResult(..., cached=True)
+            # 4. 캐시 확인 — 동일 텍스트면 API 호출 없이 즉시 반환 (PRD F4-1)
+            if self.cache:
+                cache_result = self.cache.lookup(ocr_result.text)
+                if cache_result.hit:
+                    from mallangmollang.providers.base import TranslationResult as TR
+                    cached_translation = TR(translated=cache_result.translated)
+                    pipeline_result = PipelineResult(
+                        capture=capture_result,
+                        ocr=ocr_result,
+                        translation=cached_translation,
+                        cached=True,
+                    )
+                    if self._on_result:
+                        self._on_result(pipeline_result)
+                    return pipeline_result
 
             # 5. LLM 번역
             translation = await self.translator.translate_text(ocr_result.text)
+
+            # 번역 결과를 캐시에 저장 (PRD F4-1)
+            if self.cache:
+                self.cache.store(ocr_result.text, translation.translated)
+
             pipeline_result = PipelineResult(
                 capture=capture_result,
                 ocr=ocr_result,
