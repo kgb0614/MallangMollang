@@ -1,0 +1,1 @@
+from mallangmollang.ui.region_selector import RegionSelector
