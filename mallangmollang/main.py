@@ -8,6 +8,7 @@ import sys
 import threading
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import QObject, pyqtSignal
 
 from mallangmollang.infra.config import Config
 from mallangmollang.core.pipeline import Pipeline
@@ -16,6 +17,14 @@ from mallangmollang.display.presets import get_preset_by_name
 from mallangmollang.ui.tray import TrayIcon
 from mallangmollang.ui.settings import SettingsWindow
 from mallangmollang.ui.region_selector import RegionSelector
+
+
+class _Bridge(QObject):
+    """
+    asyncio 스레드 → Qt 메인 스레드로 번역 결과를 안전하게 전달하는 브리지.
+    Qt 위젯은 메인 스레드에서만 접근해야 하므로, 시그널을 통해 전달합니다.
+    """
+    translation_ready = pyqtSignal(str, object)   # (번역 텍스트, 캡처 영역)
 
 
 class App:
@@ -36,10 +45,13 @@ class App:
         self.region_selector = RegionSelector()
         self.pipeline: Pipeline | None = None
 
+        # asyncio 스레드 → Qt 메인 스레드 브리지
+        self._bridge = _Bridge()
+        self._bridge.translation_ready.connect(self._on_translation_ready)
+
         # 번역 루프 실행을 위한 asyncio 이벤트 루프 (별도 스레드)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
-        self._translation_task = None
         self._running = False
 
         self._connect_signals()
@@ -67,17 +79,21 @@ class App:
 
         pipeline = Pipeline.from_config(self.config)
 
-        # 번역 결과를 오버레이로 전달
+        # 번역 결과를 브리지 시그널로 메인 스레드에 전달 (스레드 안전)
         def on_result(result):
             if result.translation and result.translation.translated:
                 region = self.config.get("capture.region")
-                self.overlay.show_translation(
+                self._bridge.translation_ready.emit(
                     result.translation.translated,
-                    region=tuple(region) if region else None,
+                    tuple(region) if region else None,
                 )
 
         pipeline.on_result(on_result)
         return pipeline
+
+    def _on_translation_ready(self, text: str, region):
+        """메인 스레드에서 오버레이를 업데이트합니다."""
+        self.overlay.show_translation(text, region=region)
 
     def _start_translation(self):
         """별도 스레드에서 asyncio 번역 루프를 시작합니다."""
@@ -157,6 +173,8 @@ class App:
         win.exec()
 
         if was_running:
+            # 설정이 바뀌었을 수 있으므로 pipeline을 새로 생성
+            self.pipeline = None
             self._start_translation()
 
     def _on_settings_saved(self):

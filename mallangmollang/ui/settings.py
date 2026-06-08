@@ -5,12 +5,11 @@ API 키, 언어, 캡처, 표시, 번역 설정을 탭 구조로 제공합니다.
 
 from PyQt6.QtWidgets import (
     QDialog, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QComboBox, QSpinBox, QCheckBox,
-    QPushButton, QGroupBox, QFormLayout, QSlider, QColorDialog,
-    QMessageBox, QDoubleSpinBox,
+    QLineEdit, QComboBox, QSpinBox, QCheckBox,
+    QPushButton, QGroupBox, QFormLayout,
+    QMessageBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import pyqtSignal
 
 from mallangmollang.infra.config import Config
 
