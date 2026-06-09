@@ -1,19 +1,24 @@
 """
 오버레이 창 모듈
-번역 결과를 화면 위에 반투명 자막 형태로 표시합니다.
+번역 결과를 캡처 영역 위에 반투명 배경으로 겹쳐서 표시합니다.
 
 특징:
+- 캡처 영역과 동일한 위치/크기로 정확히 겹침
 - 테두리 없음 (FramelessWindowHint)
 - 배경 투명 (WA_TranslucentBackground)
 - 항상 최상위 (WindowStaysOnTopHint)
-- 마우스 클릭 투과 (WA_TransparentForMouseInput)
+- 마우스 클릭 투과 (WA_TransparentForMouseEvents)
+- SetWindowDisplayAffinity로 mss 캡처에서 제외 (피드백 루프 방지)
 """
+
+import sys
 
 from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QApplication
 from PyQt6.QtCore import Qt, QTimer, QPoint, QRect
 from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QPainterPath
 
 from mallangmollang.display.presets import OverlayPreset, PRESET_DEFAULT
+from mallangmollang.display.area_indicator import _exclude_from_screen_capture
 
 
 class OverlayWindow(QWidget):
@@ -31,8 +36,14 @@ class OverlayWindow(QWidget):
         self.preset = preset or PRESET_DEFAULT
         self._text = ""
 
+        self._current_region: tuple[int, int, int, int] | None = None
+
         self._setup_window()
         self._setup_ui()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        _exclude_from_screen_capture(int(self.winId()))
 
     def _setup_window(self):
         """창 속성 설정: 투명 + 항상 최상위 + 클릭 투과"""
@@ -97,21 +108,21 @@ class OverlayWindow(QWidget):
         region: tuple[int, int, int, int] | None = None,
     ):
         """
-        번역 텍스트를 지정된 위치에 표시합니다.
+        번역 텍스트를 캡처 영역 위에 겹쳐서 표시합니다.
 
         Args:
             text: 표시할 번역 텍스트
             position: (x, y) 절대 좌표. None이면 현재 위치 유지.
-            region: (x, y, w, h) 캡처 영역. position 대신 사용 시 영역 아래에 표시.
+            region: (x, y, w, h) 캡처 영역. 이 영역과 동일한 위치/크기로 겹침.
         """
         self._text = text
         self._label.setText(text)
-        self._label.adjustSize()
-        self.adjustSize()
 
         if region is not None:
             x, y, w, h = region
-            self.move(x, y + h + 4)   # 캡처 영역 바로 아래에 표시
+            self._current_region = region
+            self.setFixedSize(w, h)
+            self.move(x, y)
         elif position is not None:
             self.move(position[0], position[1])
 
