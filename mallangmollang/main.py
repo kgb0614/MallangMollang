@@ -261,8 +261,17 @@ def main():
             )
             return 1
 
-    app = App(qt_app)
-    return app.run()
+    try:
+        app = App(qt_app)
+        return app.run()
+    except Exception as e:
+        import traceback
+        QMessageBox.critical(
+            None,
+            "시작 오류",
+            f"앱 시작 중 오류가 발생했습니다:\n\n{traceback.format_exc()}"
+        )
+        return 1
 
 
 if __name__ == "__main__":
