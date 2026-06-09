@@ -30,6 +30,7 @@ class PipelineResult:
 
 # 파이프라인 이벤트 콜백 타입
 OnResultCallback = Callable[[PipelineResult], None]
+OnStatusCallback = Callable[[str], None]   # "idle" | "translating" | "error"
 
 
 class Pipeline:
@@ -63,6 +64,7 @@ class Pipeline:
 
         self._running = False
         self._on_result: OnResultCallback | None = None
+        self._on_status: OnStatusCallback | None = None
 
     @classmethod
     def from_config(cls, config: Config) -> "Pipeline":
@@ -94,6 +96,10 @@ class Pipeline:
         """번역 결과를 받을 콜백을 등록합니다 (Display 연결용)."""
         self._on_result = callback
 
+    def on_status(self, callback: OnStatusCallback):
+        """파이프라인 상태 변화를 받을 콜백을 등록합니다 (AreaIndicator 연결용)."""
+        self._on_status = callback
+
     async def run_once(self, region: tuple[int, int, int, int] | None = None) -> PipelineResult:
         """
         한 번의 캡처-번역 사이클을 실행합니다.
@@ -121,7 +127,10 @@ class Pipeline:
                     skipped=True,
                 )
 
-        # 3. 번역 경로 분기
+        # 3. 변경 감지 통과 — 실제 처리 시작
+        if self._on_status:
+            self._on_status("translating")
+
         vision_mode = self.config.get("translation.vision_mode", False)
 
         if vision_mode:
@@ -201,8 +210,12 @@ class Pipeline:
         while self._running:
             try:
                 await self.run_once(region)
+                if self._on_status:
+                    self._on_status("idle")
             except Exception as e:
                 print(f"[Pipeline] 사이클 에러: {e}")
+                if self._on_status:
+                    self._on_status("error")
             await asyncio.sleep(interval_ms / 1000.0)
 
     def stop(self):

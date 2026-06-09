@@ -50,6 +50,9 @@ class OcrResult:
     regions: list[TextRegion] = field(default_factory=list)  # 개별 텍스트 영역들
 
 
+_OSD_REDETECT_INTERVAL = 10
+
+
 class OcrEngine:
     """
     Tesseract OCR 엔진 래퍼.
@@ -59,6 +62,10 @@ class OcrEngine:
         result = engine.extract_text(image, lang="eng")
         print(result.text, result.confidence)
     """
+
+    def __init__(self):
+        self._cached_lang: str | None = None
+        self._osd_cycle_count: int = 0
 
     def detect_script(self, image: Image.Image) -> str:
         """
@@ -97,7 +104,11 @@ class OcrEngine:
             OcrResult
         """
         if lang == "auto":
-            lang = self.detect_script(image)
+            self._osd_cycle_count += 1
+            if self._cached_lang is None or self._osd_cycle_count >= _OSD_REDETECT_INTERVAL:
+                self._cached_lang = self.detect_script(image)
+                self._osd_cycle_count = 0
+            lang = self._cached_lang
 
         if preprocess:
             processed = self._preprocess(image)

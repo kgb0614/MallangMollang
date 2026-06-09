@@ -27,6 +27,7 @@ class _Bridge(QObject):
     Qt 위젯은 메인 스레드에서만 접근해야 하므로, 시그널을 통해 전달합니다.
     """
     translation_ready = pyqtSignal(str, object)   # (번역 텍스트, 캡처 영역)
+    status_changed = pyqtSignal(str)               # "idle" | "translating" | "error"
 
 
 class App:
@@ -52,6 +53,7 @@ class App:
         # asyncio 스레드 → Qt 메인 스레드 브리지
         self._bridge = _Bridge()
         self._bridge.translation_ready.connect(self._on_translation_ready)
+        self._bridge.status_changed.connect(self._on_status_changed)
 
         # 번역 루프 실행을 위한 asyncio 이벤트 루프 (별도 스레드)
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -76,9 +78,7 @@ class App:
         self.panel.quit_requested.connect(self._on_quit)
 
         self.region_selector.region_selected.connect(self._on_region_selected)
-        self.region_selector.selection_cancelled.connect(
-            lambda: self.tray.show_message("말랑몰랑", "영역 선택이 취소되었습니다.")
-        )
+        self.region_selector.selection_cancelled.connect(self._on_region_cancelled)
 
     def _is_provider_configured(self) -> bool:
         """현재 프로바이더가 최소한의 설정을 갖추고 있는지 확인합니다."""
@@ -113,11 +113,18 @@ class App:
                 )
 
         pipeline.on_result(on_result)
+        pipeline.on_status(lambda status: self._bridge.status_changed.emit(status))
         return pipeline
 
     def _on_translation_ready(self, text: str, region):
         """메인 스레드에서 오버레이를 업데이트합니다."""
         self.overlay.show_translation(text, region=region)
+
+    def _on_status_changed(self, status: str):
+        """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""
+        self.indicator.set_status(status)
+        if status == "error":
+            self.panel.set_status("● 오류 발생", "rgba(220,50,50,220)")
 
     def _start_translation(self):
         """별도 스레드에서 asyncio 번역 루프를 시작합니다."""
@@ -223,9 +230,10 @@ class App:
         self.overlay.set_preset(get_preset_by_name(preset_name))
 
     def _on_region_select(self):
-        """영역 선택 UI를 시작합니다."""
+        """영역 선택 UI를 시작합니다. 패널을 숨겨서 간섭을 방지합니다."""
         if self._running:
             self._stop_translation()
+        self.panel.hide()
         self.region_selector.start()
 
     def _on_region_selected(self, region: tuple):
@@ -233,10 +241,15 @@ class App:
         x, y, w, h = region
         self.config.set("capture.region", [x, y, w, h])
         self.tray.show_message("말랑몰랑", f"영역 설정 완료: {w}×{h}")
-        # 번역 중이었다면 영역 표시 창도 즉시 이동
         if self._running:
             self.indicator.set_region(x, y, w, h)
+        self.panel.show()
         self._start_translation()
+
+    def _on_region_cancelled(self):
+        """영역 선택이 취소되면 패널을 복원합니다."""
+        self.panel.show()
+        self.tray.show_message("말랑몰랑", "영역 선택이 취소되었습니다.")
 
     def _show_panel(self):
         """컨트롤 패널을 화면에 표시합니다."""

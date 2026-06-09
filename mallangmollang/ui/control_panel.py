@@ -16,7 +16,18 @@ _PANEL_WIDTH  = 210
 _CORNER_RADIUS = 10
 
 
+def _shift_hex(hex_color: str, delta: int) -> str:
+    """hex 색상을 delta만큼 밝게(+) 또는 어둡게(-) 변환합니다."""
+    h = hex_color.lstrip("#")
+    r = max(0, min(255, int(h[0:2], 16) + delta))
+    g = max(0, min(255, int(h[2:4], 16) + delta))
+    b = max(0, min(255, int(h[4:6], 16) + delta))
+    return f"rgb({r},{g},{b})"
+
+
 def _btn_style(bg: str) -> str:
+    hover = _shift_hex(bg, 30)
+    pressed = _shift_hex(bg, -20)
     return f"""
         QPushButton {{
             background-color: {bg};
@@ -26,8 +37,8 @@ def _btn_style(bg: str) -> str:
             padding: 5px 8px;
             font-size: 11px;
         }}
-        QPushButton:hover  {{ background-color: rgba(255,255,255,25); }}
-        QPushButton:pressed {{ background-color: rgba(0,0,0,50); }}
+        QPushButton:hover  {{ background-color: {hover}; }}
+        QPushButton:pressed {{ background-color: {pressed}; }}
     """
 
 
