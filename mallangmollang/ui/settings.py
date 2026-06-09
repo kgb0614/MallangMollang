@@ -108,12 +108,16 @@ class SettingsWindow(QDialog):
 
         self._gemini_model = QComboBox()
         self._gemini_model.addItems([
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
             "gemini-2.0-flash",
             "gemini-2.0-flash-lite",
             "gemini-1.5-flash",
             "gemini-1.5-pro",
         ])
         self._gemini_model.setEditable(True)
+        self._gemini_model.setToolTip("목록에 없는 모델명은 직접 입력할 수 있습니다")
         form.addRow("모델:", self._gemini_model)
 
         self._gemini_endpoint = QComboBox()

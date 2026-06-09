@@ -19,7 +19,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "active": "gemini",          # 현재 활성화된 LLM 프로바이더
         "gemini": {
             "api_key": "",
-            "model": "gemini-2.0-flash",
+            "model": "gemini-2.5-flash",
             "endpoint": "ai_studio",      # "ai_studio" 또는 "vertex"
             "vertex": {
                 "project_id": "",
