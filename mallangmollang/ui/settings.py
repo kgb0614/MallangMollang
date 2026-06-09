@@ -146,21 +146,18 @@ class SettingsWindow(QDialog):
         vtx_group = QGroupBox("Vertex AI 인증")
         vtx_form = QFormLayout(vtx_group)
 
-        self._vertex_project_id = QLineEdit()
-        self._vertex_project_id.setPlaceholderText("예: my-gcp-project-123")
-        vtx_form.addRow("프로젝트 ID:", self._vertex_project_id)
-
         self._vertex_region = QLineEdit()
-        self._vertex_region.setPlaceholderText("예: us-central1")
+        self._vertex_region.setPlaceholderText("예: us-central1  (JSON에 없으므로 직접 입력)")
         vtx_form.addRow("리전:", self._vertex_region)
 
         # 서비스 계정 JSON — 파일 선택 버튼
-        sa_label = QLabel("서비스 계정 JSON을 붙여넣거나 파일을 선택하세요:")
+        # project_id 등 나머지 정보는 JSON에서 자동 추출됩니다
+        sa_label = QLabel("서비스 계정 JSON을 붙여넣거나 파일을 선택하세요\n(project_id, client_email, private_key 등은 JSON에서 자동 추출됩니다)")
         vtx_form.addRow(sa_label)
 
         self._vertex_sa_json = QTextEdit()
-        self._vertex_sa_json.setPlaceholderText('{"type": "service_account", ...}')
-        self._vertex_sa_json.setMinimumHeight(120)
+        self._vertex_sa_json.setPlaceholderText('{"type": "service_account", "project_id": "...", ...}')
+        self._vertex_sa_json.setMinimumHeight(140)
         vtx_form.addRow(self._vertex_sa_json)
 
         sa_browse_btn = QPushButton("JSON 파일 선택...")
@@ -384,7 +381,6 @@ class SettingsWindow(QDialog):
         self._gemini_key.setText(c.get("provider.gemini.api_key", ""))
 
         # Vertex AI
-        self._vertex_project_id.setText(c.get("provider.gemini.vertex.project_id", ""))
         self._vertex_region.setText(c.get("provider.gemini.vertex.region", "us-central1"))
         self._vertex_sa_json.setPlainText(c.get("provider.gemini.vertex.service_account", ""))
 
@@ -459,7 +455,6 @@ class SettingsWindow(QDialog):
         c.set("provider.gemini.model", self._gemini_model.currentText())
         c.set("provider.gemini.endpoint", self._gemini_endpoint.currentText())
         c.set("provider.gemini.api_key", self._gemini_key.text())
-        c.set("provider.gemini.vertex.project_id", self._vertex_project_id.text())
         c.set("provider.gemini.vertex.region", self._vertex_region.text())
         c.set("provider.gemini.vertex.service_account", self._vertex_sa_json.toPlainText())
 
@@ -509,19 +504,15 @@ class SettingsWindow(QDialog):
             QMessageBox.warning(self, "연결 테스트", str(e))
             return
 
+        loop = asyncio.new_event_loop()
         try:
-            loop = asyncio.new_event_loop()
-            ok = loop.run_until_complete(provider.test_connection())
+            loop.run_until_complete(provider.test_connection())
+            QMessageBox.information(self, "연결 테스트", "연결에 성공했습니다! ✓")
+        except Exception as e:
+            QMessageBox.critical(self, "연결 실패", f"연결 중 오류가 발생했습니다:\n\n{e}")
+        finally:
             loop.run_until_complete(provider.close())
             loop.close()
-        except Exception as e:
-            QMessageBox.critical(self, "연결 실패", f"연결 중 오류가 발생했습니다:\n{e}")
-            return
-
-        if ok:
-            QMessageBox.information(self, "연결 테스트", "연결에 성공했습니다! ✓")
-        else:
-            QMessageBox.warning(self, "연결 실패", "API 키 또는 설정을 확인해주세요.")
 
     def _create_test_provider(self, provider_name: str):
         """테스트용 프로바이더 인스턴스를 생성합니다."""
@@ -536,9 +527,8 @@ class SettingsWindow(QDialog):
                     api_key="",
                     model=self._gemini_model.currentText(),
                     endpoint="vertex",
-                    vertex_project_id=self._vertex_project_id.text(),
                     vertex_region=self._vertex_region.text() or "us-central1",
-                    service_account=sa_json,
+                    service_account=sa_json,  # project_id는 JSON에서 자동 추출
                 )
             else:
                 api_key = self._gemini_key.text().strip()

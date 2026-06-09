@@ -21,13 +21,9 @@ from .base import BaseProvider, TranslateParams, TranslationResult
 # AI Studio REST API 기본 URL
 _AI_STUDIO_URL = "https://generativelanguage.googleapis.com/v1beta"
 
-# Vision을 지원하는 모델 목록
-_VISION_MODELS = {
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-1.0-pro-vision",
+# Vision을 지원하지 않는 모델 — 나머지 Gemini 모델은 모두 Vision 지원
+_NON_VISION_MODELS = {
+    "gemini-1.0-pro",
 }
 
 
@@ -61,6 +57,9 @@ class GeminiProvider(BaseProvider):
 
         if endpoint == "vertex" and service_account:
             self._service_account_info = _load_service_account(service_account)
+            # JSON에서 project_id 자동 추출 (명시적으로 넘긴 값이 없을 때)
+            if not self.vertex_project_id and self._service_account_info:
+                self.vertex_project_id = self._service_account_info.get("project_id", "")
 
     @property
     def name(self) -> str:
@@ -68,7 +67,7 @@ class GeminiProvider(BaseProvider):
 
     def supports_vision(self) -> bool:
         """현재 선택된 모델이 Vision을 지원하는지 확인합니다."""
-        return self.model in _VISION_MODELS
+        return self.model not in _NON_VISION_MODELS
 
     async def translate(
         self,
@@ -108,13 +107,10 @@ class GeminiProvider(BaseProvider):
         )
 
     async def test_connection(self) -> bool:
-        """API 연결이 유효한지 간단한 요청으로 확인합니다."""
-        try:
-            payload = _build_text_payload("안녕", TranslateParams(max_tokens=10))
-            await self._request(payload)
-            return True
-        except Exception:
-            return False
+        """API 연결이 유효한지 간단한 요청으로 확인합니다. 실패 시 예외를 그대로 전파합니다."""
+        payload = _build_text_payload("안녕", TranslateParams(max_tokens=10))
+        await self._request(payload)
+        return True
 
     async def _get_client(self) -> httpx.AsyncClient:
         """httpx 클라이언트를 재사용합니다 (연결 풀 유지)."""
