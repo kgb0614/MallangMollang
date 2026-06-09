@@ -241,6 +241,12 @@ class App:
                 "설정에서 API 키를 입력하고 번역 영역을 지정해주세요."
             )
             self._on_settings()
+        elif not self.config.get("capture.region"):
+            # 프로바이더는 설정됐지만 캡처 영역이 없으면 영역 선택 안내
+            self.tray.show_message(
+                "말랑몰랑",
+                "트레이 아이콘을 우클릭 → '영역 재지정'으로 번역 영역을 지정해주세요."
+            )
 
         return self.qt_app.exec()
 
