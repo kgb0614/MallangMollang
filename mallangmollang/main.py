@@ -68,14 +68,26 @@ class App:
             lambda: self.tray.show_message("말랑몰랑", "영역 선택이 취소되었습니다.")
         )
 
-    def _build_pipeline(self):
-        """Config를 기반으로 Pipeline을 생성합니다."""
-        # API 키가 없으면 파이프라인을 만들 수 없음
+    def _is_provider_configured(self) -> bool:
+        """현재 프로바이더가 최소한의 설정을 갖추고 있는지 확인합니다."""
         active = self.config.get("provider.active", "gemini")
         if active == "gemini":
-            key = self.config.get("provider.gemini.api_key", "")
-            if not key:
-                return None
+            endpoint = self.config.get("provider.gemini.endpoint", "ai_studio")
+            if endpoint == "vertex":
+                return bool(self.config.get("provider.gemini.vertex.service_account", ""))
+            return bool(self.config.get("provider.gemini.api_key", ""))
+        if active == "openai":
+            return bool(self.config.get("provider.openai.api_key", ""))
+        if active == "claude":
+            return bool(self.config.get("provider.claude.api_key", ""))
+        if active == "ollama":
+            return bool(self.config.get("provider.ollama.base_url", ""))
+        return False
+
+    def _build_pipeline(self):
+        """Config를 기반으로 Pipeline을 생성합니다."""
+        if not self._is_provider_configured():
+            return None
 
         pipeline = Pipeline.from_config(self.config)
 
@@ -169,11 +181,17 @@ class App:
             self._stop_translation()
 
         win = SettingsWindow(self.config)
-        win.settings_saved.connect(self._on_settings_saved)
+        saved = [False]
+
+        def on_saved():
+            saved[0] = True
+            self._on_settings_saved()
+
+        win.settings_saved.connect(on_saved)
         win.exec()
 
-        if was_running:
-            # 설정이 바뀌었을 수 있으므로 pipeline을 새로 생성
+        if saved[0]:
+            # 설정이 저장됐으면 항상 파이프라인 재생성 후 시작 시도
             self.pipeline = None
             self._start_translation()
 
@@ -215,9 +233,8 @@ class App:
 
         # 최초 실행 또는 API 키 미설정이면 설정 창 표시
         first_run = self.config.get("app.first_run", True)
-        api_key = self.config.get("provider.gemini.api_key", "")
 
-        if first_run or not api_key:
+        if first_run or not self._is_provider_configured():
             self.config.set("app.first_run", False)
             self.tray.show_message(
                 "말랑몰랑에 오신 것을 환영합니다!",
