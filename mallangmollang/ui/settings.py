@@ -146,8 +146,22 @@ class SettingsWindow(QDialog):
         vtx_group = QGroupBox("Vertex AI 인증")
         vtx_form = QFormLayout(vtx_group)
 
-        self._vertex_region = QLineEdit()
-        self._vertex_region.setPlaceholderText("예: us-central1  (JSON에 없으므로 직접 입력)")
+        self._vertex_region = QComboBox()
+        self._vertex_region.addItems([
+            "us-central1",
+            "us-east1",
+            "us-east4",
+            "us-west1",
+            "us-west4",
+            "europe-west1",
+            "europe-west2",
+            "europe-west4",
+            "asia-northeast1",
+            "asia-northeast3",
+            "asia-southeast1",
+        ])
+        self._vertex_region.setEditable(True)
+        self._vertex_region.setToolTip("Vertex AI는 'global'을 지원하지 않습니다. 유효한 GCP 리전을 선택하세요.")
         vtx_form.addRow("리전:", self._vertex_region)
 
         # 서비스 계정 JSON — 파일 선택 버튼
@@ -381,7 +395,12 @@ class SettingsWindow(QDialog):
         self._gemini_key.setText(c.get("provider.gemini.api_key", ""))
 
         # Vertex AI
-        self._vertex_region.setText(c.get("provider.gemini.vertex.region", "us-central1"))
+        region = c.get("provider.gemini.vertex.region", "us-central1")
+        ridx = self._vertex_region.findText(region)
+        if ridx >= 0:
+            self._vertex_region.setCurrentIndex(ridx)
+        else:
+            self._vertex_region.setCurrentText(region)
         self._vertex_sa_json.setPlainText(c.get("provider.gemini.vertex.service_account", ""))
 
         # OpenAI
@@ -455,7 +474,7 @@ class SettingsWindow(QDialog):
         c.set("provider.gemini.model", self._gemini_model.currentText())
         c.set("provider.gemini.endpoint", self._gemini_endpoint.currentText())
         c.set("provider.gemini.api_key", self._gemini_key.text())
-        c.set("provider.gemini.vertex.region", self._vertex_region.text())
+        c.set("provider.gemini.vertex.region", self._vertex_region.currentText())
         c.set("provider.gemini.vertex.service_account", self._vertex_sa_json.toPlainText())
 
         # OpenAI
@@ -527,7 +546,7 @@ class SettingsWindow(QDialog):
                     api_key="",
                     model=self._gemini_model.currentText(),
                     endpoint="vertex",
-                    vertex_region=self._vertex_region.text() or "us-central1",
+                    vertex_region=self._vertex_region.currentText() or "us-central1",
                     service_account=sa_json,  # project_id는 JSON에서 자동 추출
                 )
             else:
