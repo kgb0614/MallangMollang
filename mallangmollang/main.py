@@ -13,10 +13,12 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from mallangmollang.infra.config import Config
 from mallangmollang.core.pipeline import Pipeline
 from mallangmollang.display.overlay import OverlayWindow
+from mallangmollang.display.area_indicator import AreaIndicatorWindow
 from mallangmollang.display.presets import get_preset_by_name
 from mallangmollang.ui.tray import TrayIcon
 from mallangmollang.ui.settings import SettingsWindow
 from mallangmollang.ui.region_selector import RegionSelector
+from mallangmollang.ui.control_panel import ControlPanel
 
 
 class _Bridge(QObject):
@@ -41,6 +43,8 @@ class App:
         self.overlay = OverlayWindow(
             preset=get_preset_by_name(self.config.get("display.active_preset", "기본"))
         )
+        self.indicator = AreaIndicatorWindow()
+        self.panel = ControlPanel()
         self.tray = TrayIcon()
         self.region_selector = RegionSelector()
         self.pipeline: Pipeline | None = None
@@ -58,10 +62,18 @@ class App:
 
     def _connect_signals(self):
         """각 컴포넌트의 시그널을 슬롯에 연결합니다."""
+        # 트레이 시그널
         self.tray.toggle_requested.connect(self._on_toggle)
         self.tray.settings_requested.connect(self._on_settings)
         self.tray.region_requested.connect(self._on_region_select)
+        self.tray.panel_requested.connect(self._show_panel)
         self.tray.quit_requested.connect(self._on_quit)
+
+        # 컨트롤 패널 시그널 (트레이와 동일한 핸들러)
+        self.panel.toggle_requested.connect(self._on_toggle)
+        self.panel.settings_requested.connect(self._on_settings)
+        self.panel.region_requested.connect(self._on_region_select)
+        self.panel.quit_requested.connect(self._on_quit)
 
         self.region_selector.region_selected.connect(self._on_region_selected)
         self.region_selector.selection_cancelled.connect(
@@ -130,6 +142,14 @@ class App:
 
         self._running = True
         self.tray.set_active(True)
+        self.panel.set_active(True)
+
+        # 영역 표시 창 갱신
+        rx, ry, rw, rh = region
+        self.indicator.set_region(rx, ry, rw, rh)
+        self.indicator.set_status("idle")
+        self.indicator.show()
+
         self.tray.show_message("말랑몰랑", "번역을 시작합니다.")
 
         self._loop = asyncio.new_event_loop()
@@ -162,7 +182,9 @@ class App:
 
         self._running = False
         self.tray.set_active(False)
+        self.panel.set_active(False)
         self.overlay.hide_translation()
+        self.indicator.hide()
         self.tray.show_message("말랑몰랑", "번역을 중지합니다.")
 
     # ── 시그널 핸들러 ──
@@ -211,7 +233,28 @@ class App:
         x, y, w, h = region
         self.config.set("capture.region", [x, y, w, h])
         self.tray.show_message("말랑몰랑", f"영역 설정 완료: {w}×{h}")
+        # 번역 중이었다면 영역 표시 창도 즉시 이동
+        if self._running:
+            self.indicator.set_region(x, y, w, h)
         self._start_translation()
+
+    def _show_panel(self):
+        """컨트롤 패널을 화면에 표시합니다."""
+        self.panel.show()
+        self.panel.raise_()
+        self.panel.activateWindow()
+
+    def _init_panel_position(self):
+        """컨트롤 패널을 화면 우상단에 배치합니다."""
+        screen = self.qt_app.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            self.panel.adjustSize()
+            margin = 16
+            self.panel.move(
+                geo.right() - self.panel.width() - margin,
+                geo.top() + margin,
+            )
 
     def _on_quit(self):
         """앱을 종료합니다."""
@@ -230,6 +273,8 @@ class App:
     def run(self):
         """앱을 시작합니다. 최초 실행이면 설정 창을 먼저 엽니다."""
         self.tray.show()
+        self._init_panel_position()
+        self.panel.show()
 
         # 최초 실행 또는 API 키 미설정이면 설정 창 표시
         first_run = self.config.get("app.first_run", True)

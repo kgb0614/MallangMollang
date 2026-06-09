@@ -41,6 +41,7 @@ class TrayIcon(QObject):
     toggle_requested = pyqtSignal()      # 번역 시작/중지
     settings_requested = pyqtSignal()    # 설정 창 열기
     region_requested = pyqtSignal()      # 영역 재지정
+    panel_requested = pyqtSignal()       # 컨트롤 패널 표시
     quit_requested = pyqtSignal()        # 앱 종료
 
     def __init__(self, parent=None):
@@ -63,6 +64,9 @@ class TrayIcon(QObject):
 
         self._region_action = menu.addAction("영역 재지정")
         self._region_action.triggered.connect(self.region_requested)
+
+        panel_action = menu.addAction("컨트롤 패널 표시")
+        panel_action.triggered.connect(self.panel_requested)
 
         menu.addSeparator()
 
@@ -102,6 +106,8 @@ class TrayIcon(QObject):
         )
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason):
-        """트레이 아이콘 더블클릭 시 설정 창을 엽니다."""
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+        """트레이 아이콘 단일클릭 → 패널 표시, 더블클릭 → 설정 창."""
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.panel_requested.emit()
+        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.settings_requested.emit()
