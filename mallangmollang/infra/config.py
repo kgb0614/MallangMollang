@@ -19,11 +19,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "active": "gemini",          # 현재 활성화된 LLM 프로바이더
         "gemini": {
             "api_key": "",
-            "model": "gemini-2.5-flash",
+            "model": "gemini-3.5-flash",
             "endpoint": "ai_studio",      # "ai_studio" 또는 "vertex"
             "vertex": {
                 "project_id": "",
-                "region": "us-central1",
+                "region": "global",
                 # 서비스 계정 JSON 내용(문자열) 또는 .json 파일 경로
                 "service_account": "",
             },

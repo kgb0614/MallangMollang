@@ -108,11 +108,10 @@ class SettingsWindow(QDialog):
 
         self._gemini_model = QComboBox()
         self._gemini_model.addItems([
+            "gemini-3.5-flash",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
             "gemini-1.5-flash",
             "gemini-1.5-pro",
         ])
@@ -148,6 +147,7 @@ class SettingsWindow(QDialog):
 
         self._vertex_region = QComboBox()
         self._vertex_region.addItems([
+            "global",
             "us-central1",
             "us-east1",
             "us-east4",
@@ -161,7 +161,7 @@ class SettingsWindow(QDialog):
             "asia-southeast1",
         ])
         self._vertex_region.setEditable(True)
-        self._vertex_region.setToolTip("Vertex AI는 'global'을 지원하지 않습니다. 유효한 GCP 리전을 선택하세요.")
+        self._vertex_region.setToolTip("global: 일부 신규 모델 전용 / 특정 리전: 데이터 레지던시 필요 시")
         vtx_form.addRow("리전:", self._vertex_region)
 
         # 서비스 계정 JSON — 파일 선택 버튼

@@ -159,8 +159,13 @@ class GeminiProvider(BaseProvider):
             raise ValueError("Vertex AI를 사용하려면 프로젝트 ID가 필요합니다.")
 
         token = await self._get_access_token()
+        # global 리전은 호스트에 리전 접두어를 붙이지 않음
+        if self.vertex_region == "global":
+            host = "aiplatform.googleapis.com"
+        else:
+            host = f"{self.vertex_region}-aiplatform.googleapis.com"
         url = (
-            f"https://{self.vertex_region}-aiplatform.googleapis.com/v1"
+            f"https://{host}/v1"
             f"/projects/{self.vertex_project_id}"
             f"/locations/{self.vertex_region}"
             f"/publishers/google/models/{self.model}:generateContent"
