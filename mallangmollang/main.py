@@ -59,6 +59,7 @@ class App:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
         self._running = False
+        self._snapshot_running = False
 
         self._connect_signals()
 
@@ -123,7 +124,11 @@ class App:
     def _on_status_changed(self, status: str):
         """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""
         self.indicator.set_status(status)
-        if status == "error":
+        if status == "translating":
+            # 변경 감지됨 → 이전 번역을 즉시 숨겨서 스크롤 후 오래된 번역이
+            # 새 화면 위에 남아있는 문제를 방지
+            self.overlay.hide_translation()
+        elif status == "error":
             self.panel.set_status("● 오류 발생", "rgba(220,50,50,220)")
 
     def _start_translation(self):
@@ -194,14 +199,70 @@ class App:
         self.indicator.hide()
         self.tray.show_message("말랑몰랑", "번역을 중지합니다.")
 
+    def _ensure_pipeline(self) -> bool:
+        """Pipeline이 없으면 생성합니다. 실패 시 False 반환."""
+        if self.pipeline is None:
+            self.pipeline = self._build_pipeline()
+        if self.pipeline is None:
+            self.tray.show_message(
+                "말랑몰랑",
+                "API 키가 설정되지 않았습니다. 설정 창에서 입력해주세요."
+            )
+            self._on_settings()
+            return False
+        return True
+
+    def _run_snapshot(self):
+        """한 번만 캡처-번역을 실행합니다 (스냅샷 모드)."""
+        if self._snapshot_running:
+            return
+
+        region = self.config.get("capture.region")
+        if not region:
+            self.tray.show_message("말랑몰랑", "번역 영역을 먼저 지정해주세요.")
+            self._on_region_select()
+            return
+
+        if not self._ensure_pipeline():
+            return
+
+        self._snapshot_running = True
+
+        rx, ry, rw, rh = region
+        self.indicator.set_region(rx, ry, rw, rh)
+        self.indicator.show()
+
+        self.panel.set_status("● 번역 중...", "rgba(255,210,50,220)")
+
+        def run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    self.pipeline.run_once(region=tuple(region))
+                )
+                self._bridge.status_changed.emit("idle")
+            except Exception as e:
+                print(f"[App] 스냅샷 오류: {e}")
+                self._bridge.status_changed.emit("error")
+            finally:
+                self._snapshot_running = False
+                loop.close()
+
+        threading.Thread(target=run, daemon=True).start()
+
     # ── 시그널 핸들러 ──
 
     def _on_toggle(self):
-        """번역 시작/중지를 토글합니다."""
-        if self._running:
-            self._stop_translation()
+        """번역 시작/중지를 토글합니다. 모드에 따라 동작이 다릅니다."""
+        mode = self.config.get("translation.run_mode", "realtime")
+        if mode == "snapshot":
+            self._run_snapshot()
         else:
-            self._start_translation()
+            if self._running:
+                self._stop_translation()
+            else:
+                self._start_translation()
 
     def _on_settings(self):
         """설정 창을 엽니다."""
@@ -220,14 +281,18 @@ class App:
         win.exec()
 
         if saved[0]:
-            # 설정이 저장됐으면 항상 파이프라인 재생성 후 시작 시도
             self.pipeline = None
-            self._start_translation()
+            mode = self.config.get("translation.run_mode", "realtime")
+            if mode == "realtime":
+                self._start_translation()
+            # snapshot 모드에서는 자동 시작하지 않음 — 사용자가 직접 클릭
 
     def _on_settings_saved(self):
-        """설정 저장 후 오버레이 프리셋을 갱신합니다."""
+        """설정 저장 후 오버레이 프리셋과 패널 모드를 갱신합니다."""
         preset_name = self.config.get("display.active_preset", "기본")
         self.overlay.set_preset(get_preset_by_name(preset_name))
+        mode = self.config.get("translation.run_mode", "realtime")
+        self.panel.set_mode(mode)
 
     def _on_region_select(self):
         """영역 선택 UI를 시작합니다. 패널을 숨겨서 간섭을 방지합니다."""
@@ -237,14 +302,16 @@ class App:
         self.region_selector.start()
 
     def _on_region_selected(self, region: tuple):
-        """영역 선택 완료 후 Config를 저장하고 번역을 시작합니다."""
+        """영역 선택 완료 후 Config를 저장합니다."""
         x, y, w, h = region
         self.config.set("capture.region", [x, y, w, h])
         self.tray.show_message("말랑몰랑", f"영역 설정 완료: {w}×{h}")
         if self._running:
             self.indicator.set_region(x, y, w, h)
         self.panel.show()
-        self._start_translation()
+        mode = self.config.get("translation.run_mode", "realtime")
+        if mode == "realtime":
+            self._start_translation()
 
     def _on_region_cancelled(self):
         """영역 선택이 취소되면 패널을 복원합니다."""
@@ -287,6 +354,8 @@ class App:
         """앱을 시작합니다. 최초 실행이면 설정 창을 먼저 엽니다."""
         self.tray.show()
         self._init_panel_position()
+        mode = self.config.get("translation.run_mode", "realtime")
+        self.panel.set_mode(mode)
         self.panel.show()
 
         # 최초 실행 또는 API 키 미설정이면 설정 창 표시

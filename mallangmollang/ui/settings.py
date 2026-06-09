@@ -330,7 +330,13 @@ class SettingsWindow(QDialog):
         form.addRow("번역 언어:", self._target_lang)
 
         self._ocr_lang = QComboBox()
-        self._ocr_lang.addItems(["eng", "jpn", "chi_sim", "chi_tra", "kor", "eng+jpn"])
+        self._ocr_lang.addItem("자동 감지", "auto")
+        self._ocr_lang.addItem("영어 (eng)", "eng")
+        self._ocr_lang.addItem("일본어 (jpn)", "jpn")
+        self._ocr_lang.addItem("한국어 (kor)", "kor")
+        self._ocr_lang.addItem("중국어 간체 (chi_sim)", "chi_sim")
+        self._ocr_lang.addItem("중국어 번체 (chi_tra)", "chi_tra")
+        self._ocr_lang.addItem("영어+일본어 (eng+jpn)", "eng+jpn")
         self._ocr_lang.setEditable(True)
         form.addRow("OCR 언어:", self._ocr_lang)
 
@@ -366,6 +372,11 @@ class SettingsWindow(QDialog):
 
         group = QGroupBox("번역 설정")
         form = QFormLayout(group)
+
+        self._run_mode = QComboBox()
+        self._run_mode.addItem("실시간 (자동 반복)", "realtime")
+        self._run_mode.addItem("스냅샷 (한 번만)", "snapshot")
+        form.addRow("번역 모드:", self._run_mode)
 
         self._context_count = QSpinBox()
         self._context_count.setRange(0, 10)
@@ -473,8 +484,8 @@ class SettingsWindow(QDialog):
         if tidx >= 0:
             self._target_lang.setCurrentIndex(tidx)
 
-        ocr = c.get("language.ocr_lang", "eng")
-        oidx = self._ocr_lang.findText(ocr)
+        ocr = c.get("language.ocr_lang", "auto")
+        oidx = self._ocr_lang.findData(ocr)
         if oidx >= 0:
             self._ocr_lang.setCurrentIndex(oidx)
         else:
@@ -485,6 +496,11 @@ class SettingsWindow(QDialog):
         self._hash_threshold.setValue(c.get("detector.hash_threshold", 5))
 
         # 번역 탭
+        run_mode = c.get("translation.run_mode", "realtime")
+        rmidx = self._run_mode.findData(run_mode)
+        if rmidx >= 0:
+            self._run_mode.setCurrentIndex(rmidx)
+
         self._context_count.setValue(c.get("translation.context_count", 3))
         self._vision_mode.setChecked(c.get("translation.vision_mode", False))
         self._cache_max_size.setValue(c.get("cache.max_size", 100))
@@ -529,13 +545,15 @@ class SettingsWindow(QDialog):
         # 언어
         c.set("language.source", self._source_lang.currentText())
         c.set("language.target", self._target_lang.currentText())
-        c.set("language.ocr_lang", self._ocr_lang.currentText())
+        ocr_data = self._ocr_lang.currentData()
+        c.set("language.ocr_lang", ocr_data if ocr_data else self._ocr_lang.currentText())
 
         # 캡처
         c.set("capture.interval_ms", self._interval_ms.value())
         c.set("detector.hash_threshold", self._hash_threshold.value())
 
         # 번역
+        c.set("translation.run_mode", self._run_mode.currentData())
         c.set("translation.context_count", self._context_count.value())
         c.set("translation.vision_mode", self._vision_mode.isChecked())
         c.set("cache.max_size", self._cache_max_size.value())

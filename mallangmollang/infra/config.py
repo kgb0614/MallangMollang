@@ -59,6 +59,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
     # 번역 설정
     "translation": {
+        "run_mode": "realtime",   # "realtime" (자동 반복) | "snapshot" (한 번만)
         "vision_mode": False,     # Vision API 모드 사용 여부
         "context_count": 3,       # 문맥 기억 개수 (이전 N회 번역 포함)
         "active_profile": None,   # 활성 번역 프로필 이름

@@ -79,6 +79,7 @@ class ControlPanel(QWidget):
         super().__init__(parent)
         self._drag_pos: QPoint | None = None
         self._active = False
+        self._mode = "realtime"
         self._setup_window()
         self._setup_ui()
 
@@ -157,8 +158,23 @@ class ControlPanel(QWidget):
 
     # ── 상태 갱신 ──
 
+    def set_mode(self, mode: str) -> None:
+        """번역 모드를 변경하고 버튼 표시를 갱신합니다."""
+        self._mode = mode
+        self._active = False
+        if mode == "snapshot":
+            _set_btn(self._toggle_btn, "📷 번역", "#1a6bbf")
+        else:
+            _set_btn(self._toggle_btn, "▶ 시작", "#1a6bbf")
+        self._status_lbl.setText("● 대기 중")
+        self._status_lbl.setStyleSheet(
+            "color: rgba(90,190,255,200); font-size: 10px; padding-top: 2px;"
+        )
+
     def set_active(self, active: bool) -> None:
-        """번역 활성 상태에 따라 버튼과 상태 표시를 갱신합니다."""
+        """번역 활성 상태에 따라 버튼과 상태 표시를 갱신합니다. 실시간 모드 전용."""
+        if self._mode == "snapshot":
+            return
         self._active = active
         if active:
             _set_btn(self._toggle_btn, "⏹ 중지", "#b03030")
