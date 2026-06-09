@@ -299,6 +299,8 @@ class TestPipelineIntegration:
         from mallangmollang.providers.base import TranslationResult
 
         config = _make_config(tmp_path)
+        # 싱글톤 오염 방지: vision_mode 항상 False로 초기화
+        config.set("translation.vision_mode", False)
 
         # 모킹된 컴포넌트들
         mock_capture = MagicMock(spec=ScreenCapture)
