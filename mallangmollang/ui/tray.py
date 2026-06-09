@@ -5,7 +5,7 @@
 
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
 from PyQt6.QtGui import QIcon, QPixmap, QColor, QPainter
-from PyQt6.QtCore import pyqtSignal, QObject
+from PyQt6.QtCore import pyqtSignal, QObject, QTimer
 
 
 def _make_tray_icon(active: bool) -> QIcon:
@@ -41,6 +41,7 @@ class TrayIcon(QObject):
     toggle_requested = pyqtSignal()      # 번역 시작/중지
     settings_requested = pyqtSignal()    # 설정 창 열기
     region_requested = pyqtSignal()      # 영역 재지정
+    panel_requested = pyqtSignal()       # 컨트롤 패널 표시
     quit_requested = pyqtSignal()        # 앱 종료
 
     def __init__(self, parent=None):
@@ -50,6 +51,14 @@ class TrayIcon(QObject):
         self._tray = QSystemTrayIcon()
         self._tray.setToolTip("말랑몰랑 — 화면 번역기")
         self._tray.setIcon(_make_tray_icon(False))
+
+        # 단일클릭/더블클릭 구분용 타이머
+        # Windows에서 더블클릭 시 Trigger가 먼저 발생하므로,
+        # 짧은 지연 후 더블클릭이 안 오면 단일클릭으로 처리합니다.
+        self._click_timer = QTimer()
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(250)
+        self._click_timer.timeout.connect(self.panel_requested)
 
         self._build_menu()
         self._tray.activated.connect(self._on_activated)
@@ -63,6 +72,9 @@ class TrayIcon(QObject):
 
         self._region_action = menu.addAction("영역 재지정")
         self._region_action.triggered.connect(self.region_requested)
+
+        panel_action = menu.addAction("컨트롤 패널 표시")
+        panel_action.triggered.connect(self.panel_requested)
 
         menu.addSeparator()
 
@@ -102,6 +114,9 @@ class TrayIcon(QObject):
         )
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason):
-        """트레이 아이콘 더블클릭 시 설정 창을 엽니다."""
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+        """트레이 아이콘 단일클릭 → 패널 표시, 더블클릭 → 설정 창."""
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._click_timer.start()
+        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._click_timer.stop()
             self.settings_requested.emit()

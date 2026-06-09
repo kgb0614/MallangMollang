@@ -46,7 +46,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "language": {
         "source": "auto",   # 번역 원본 언어 (auto = 자동 감지)
         "target": "ko",     # 번역 대상 언어
-        "ocr_lang": "eng",  # Tesseract OCR 언어 코드
+        "ocr_lang": "auto",  # Tesseract OCR 언어 코드 ("auto" = OSD 자동 감지)
     },
 
     # 캡처 설정

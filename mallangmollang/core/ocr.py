@@ -3,12 +3,32 @@ OCR 엔진 모듈
 Tesseract를 이용한 텍스트 추출 + OpenCV 이미지 전처리를 담당합니다.
 """
 
+import re
 from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
 import pytesseract
 from PIL import Image
+
+# OSD 스크립트 이름 → Tesseract 언어 코드 매핑
+_SCRIPT_TO_LANG: dict[str, str] = {
+    "Japanese":   "jpn",
+    "Hiragana":   "jpn",
+    "Katakana":   "jpn",
+    "Korean":     "kor",
+    "Hangul":     "kor",
+    "HanS":       "chi_sim",   # 간체 한자
+    "HanT":       "chi_tra",   # 번체 한자
+    "Han":        "chi_sim",
+    "Latin":      "eng",
+    "Arabic":     "ara",
+    "Cyrillic":   "rus",
+    "Thai":       "tha",
+}
+
+# OSD 실패 시 폴백: 게임 번역에 가장 흔한 언어들
+_AUTO_FALLBACK = "jpn+eng+kor"
 
 
 @dataclass
@@ -30,6 +50,9 @@ class OcrResult:
     regions: list[TextRegion] = field(default_factory=list)  # 개별 텍스트 영역들
 
 
+_OSD_REDETECT_INTERVAL = 10
+
+
 class OcrEngine:
     """
     Tesseract OCR 엔진 래퍼.
@@ -40,10 +63,32 @@ class OcrEngine:
         print(result.text, result.confidence)
     """
 
+    def __init__(self):
+        self._cached_lang: str | None = None
+        self._osd_cycle_count: int = 0
+
+    def detect_script(self, image: Image.Image) -> str:
+        """
+        OSD(Orientation and Script Detection)로 이미지의 문자 체계를 감지합니다.
+
+        Returns:
+            Tesseract 언어 코드 (예: "jpn", "kor"). 감지 실패 시 _AUTO_FALLBACK 반환.
+        """
+        try:
+            osd = pytesseract.image_to_osd(image, config="--psm 0")
+            # OSD 출력에서 "Script: Xxx" 추출
+            match = re.search(r"Script:\s*(\S+)", osd)
+            if match:
+                script = match.group(1)
+                return _SCRIPT_TO_LANG.get(script, _AUTO_FALLBACK)
+        except pytesseract.TesseractError:
+            pass
+        return _AUTO_FALLBACK
+
     def extract_text(
         self,
         image: Image.Image,
-        lang: str = "eng",
+        lang: str = "auto",
         preprocess: bool = True,
     ) -> OcrResult:
         """
@@ -51,12 +96,20 @@ class OcrEngine:
 
         Args:
             image: 캡처된 PIL 이미지
-            lang: Tesseract 언어 코드 ("eng", "jpn", "kor" 등, "+"로 조합 가능)
+            lang: Tesseract 언어 코드 ("eng", "jpn", "kor" 등, "+"로 조합 가능).
+                  "auto"로 설정하면 OSD로 자동 감지합니다.
             preprocess: 전처리 적용 여부
 
         Returns:
             OcrResult
         """
+        if lang == "auto":
+            self._osd_cycle_count += 1
+            if self._cached_lang is None or self._osd_cycle_count >= _OSD_REDETECT_INTERVAL:
+                self._cached_lang = self.detect_script(image)
+                self._osd_cycle_count = 0
+            lang = self._cached_lang
+
         if preprocess:
             processed = self._preprocess(image)
         else:
