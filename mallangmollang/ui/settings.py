@@ -107,21 +107,19 @@ class SettingsWindow(QDialog):
         form = QFormLayout(group)
 
         self._gemini_model = QComboBox()
-        self._gemini_model.addItems([
-            "gemini-3.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-        ])
         self._gemini_model.setEditable(True)
-        self._gemini_model.setToolTip("목록에 없는 모델명은 직접 입력할 수 있습니다")
+        self._gemini_model.setToolTip(
+            "AI Studio와 Vertex AI는 모델 ID가 다를 수 있습니다.\n"
+            "목록에 없으면 직접 입력하세요."
+        )
         form.addRow("모델:", self._gemini_model)
 
         self._gemini_endpoint = QComboBox()
         self._gemini_endpoint.addItems(["ai_studio", "vertex"])
         form.addRow("엔드포인트:", self._gemini_endpoint)
+
+        # 엔드포인트에 따라 모델 목록을 교체
+        self._gemini_endpoint.currentTextChanged.connect(self._update_gemini_model_list)
 
         layout.addWidget(group)
 
@@ -261,6 +259,43 @@ class SettingsWindow(QDialog):
         layout.addStretch()
         return widget
 
+    # AI Studio 모델 ID 목록
+    _GEMINI_AIS_MODELS = [
+        "gemini-3.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
+
+    # Vertex AI 모델 ID 목록 (버텍스는 모델명 형식이 다를 수 있음)
+    _GEMINI_VERTEX_MODELS = [
+        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash-preview",
+        "gemini-3.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
+
+    def _update_gemini_model_list(self, endpoint: str):
+        """엔드포인트에 맞는 모델 목록으로 교체합니다."""
+        current = self._gemini_model.currentText()
+        self._gemini_model.blockSignals(True)
+        self._gemini_model.clear()
+        models = self._GEMINI_VERTEX_MODELS if endpoint == "vertex" else self._GEMINI_AIS_MODELS
+        self._gemini_model.addItems(models)
+        # 기존 선택값 유지 (목록에 없으면 직접 입력값으로)
+        idx = self._gemini_model.findText(current)
+        if idx >= 0:
+            self._gemini_model.setCurrentIndex(idx)
+        else:
+            self._gemini_model.setCurrentText(current)
+        self._gemini_model.blockSignals(False)
+
     def _on_gemini_endpoint_changed(self, endpoint: str):
         """Gemini 엔드포인트 변경 시 인증 패널을 전환합니다."""
         is_vertex = (endpoint == "vertex")
@@ -380,22 +415,24 @@ class SettingsWindow(QDialog):
             self._provider_combo.setCurrentIndex(idx)
 
         # Gemini
-        model = c.get("provider.gemini.model", "gemini-2.0-flash")
+        # 엔드포인트 먼저 설정 → 모델 목록 교체 → 모델 선택
+        endpoint = c.get("provider.gemini.endpoint", "ai_studio")
+        eidx = self._gemini_endpoint.findText(endpoint)
+        if eidx >= 0:
+            self._gemini_endpoint.setCurrentIndex(eidx)
+        self._update_gemini_model_list(endpoint)
+
+        model = c.get("provider.gemini.model", "gemini-3.5-flash")
         midx = self._gemini_model.findText(model)
         if midx >= 0:
             self._gemini_model.setCurrentIndex(midx)
         else:
             self._gemini_model.setCurrentText(model)
 
-        endpoint = c.get("provider.gemini.endpoint", "ai_studio")
-        eidx = self._gemini_endpoint.findText(endpoint)
-        if eidx >= 0:
-            self._gemini_endpoint.setCurrentIndex(eidx)
-
         self._gemini_key.setText(c.get("provider.gemini.api_key", ""))
 
         # Vertex AI
-        region = c.get("provider.gemini.vertex.region", "us-central1")
+        region = c.get("provider.gemini.vertex.region", "global")
         ridx = self._vertex_region.findText(region)
         if ridx >= 0:
             self._vertex_region.setCurrentIndex(ridx)
