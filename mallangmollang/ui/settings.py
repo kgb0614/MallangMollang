@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QDialog, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QComboBox, QSpinBox, QCheckBox,
     QPushButton, QGroupBox, QFormLayout,
-    QMessageBox,
+    QMessageBox, QStackedWidget, QTextEdit, QFileDialog, QLabel,
 )
 from PyQt6.QtCore import pyqtSignal
 
@@ -34,7 +34,7 @@ class SettingsWindow(QDialog):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("말랑몰랑 설정")
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(520)
         self.setModal(True)
 
         self._build_ui()
@@ -72,22 +72,39 @@ class SettingsWindow(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        group = QGroupBox("LLM 프로바이더")
-        form = QFormLayout(group)
-
         # 활성 프로바이더 선택
+        top_group = QGroupBox("LLM 프로바이더")
+        top_form = QFormLayout(top_group)
         self._provider_combo = QComboBox()
         self._provider_combo.addItems(["gemini", "openai", "claude", "ollama"])
-        form.addRow("프로바이더:", self._provider_combo)
+        top_form.addRow("프로바이더:", self._provider_combo)
+        layout.addWidget(top_group)
 
-        # Gemini 설정
-        gemini_group = QGroupBox("Gemini 설정")
-        gemini_form = QFormLayout(gemini_group)
+        # 프로바이더별 설정 패널 (QStackedWidget)
+        self._provider_stack = QStackedWidget()
+        self._provider_stack.addWidget(self._build_gemini_panel())   # 0: gemini
+        self._provider_stack.addWidget(self._build_openai_panel())   # 1: openai
+        self._provider_stack.addWidget(self._build_claude_panel())   # 2: claude
+        self._provider_stack.addWidget(self._build_ollama_panel())   # 3: ollama
+        layout.addWidget(self._provider_stack)
 
-        self._gemini_key = QLineEdit()
-        self._gemini_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._gemini_key.setPlaceholderText("AI Studio API 키")
-        gemini_form.addRow("API 키:", self._gemini_key)
+        layout.addStretch()
+
+        # 프로바이더 변경 시 스택 페이지 전환
+        self._provider_combo.currentIndexChanged.connect(
+            self._provider_stack.setCurrentIndex
+        )
+
+        return widget
+
+    def _build_gemini_panel(self) -> QWidget:
+        """Gemini 설정 패널 — AI Studio / Vertex AI 모드 전환 지원"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        group = QGroupBox("Gemini 설정")
+        form = QFormLayout(group)
 
         self._gemini_model = QComboBox()
         self._gemini_model.addItems([
@@ -97,21 +114,155 @@ class SettingsWindow(QDialog):
             "gemini-1.5-pro",
         ])
         self._gemini_model.setEditable(True)
-        gemini_form.addRow("모델:", self._gemini_model)
+        form.addRow("모델:", self._gemini_model)
 
         self._gemini_endpoint = QComboBox()
         self._gemini_endpoint.addItems(["ai_studio", "vertex"])
-        gemini_form.addRow("엔드포인트:", self._gemini_endpoint)
+        form.addRow("엔드포인트:", self._gemini_endpoint)
+
+        layout.addWidget(group)
+
+        # AI Studio 전용 패널
+        self._gemini_ais_widget = QWidget()
+        ais_form = QFormLayout(self._gemini_ais_widget)
+        ais_form.setContentsMargins(0, 0, 0, 0)
+        ais_group = QGroupBox("AI Studio 인증")
+        ais_inner = QFormLayout(ais_group)
+        self._gemini_key = QLineEdit()
+        self._gemini_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._gemini_key.setPlaceholderText("AI Studio API 키를 입력하세요")
+        ais_inner.addRow("API 키:", self._gemini_key)
+        ais_form.addRow(ais_group)
+        layout.addWidget(self._gemini_ais_widget)
+
+        # Vertex AI 전용 패널
+        self._gemini_vertex_widget = QWidget()
+        vtx_layout = QVBoxLayout(self._gemini_vertex_widget)
+        vtx_layout.setContentsMargins(0, 0, 0, 0)
+        vtx_group = QGroupBox("Vertex AI 인증")
+        vtx_form = QFormLayout(vtx_group)
+
+        self._vertex_project_id = QLineEdit()
+        self._vertex_project_id.setPlaceholderText("예: my-gcp-project-123")
+        vtx_form.addRow("프로젝트 ID:", self._vertex_project_id)
+
+        self._vertex_region = QLineEdit()
+        self._vertex_region.setPlaceholderText("예: us-central1")
+        vtx_form.addRow("리전:", self._vertex_region)
+
+        # 서비스 계정 JSON — 파일 선택 버튼
+        sa_label = QLabel("서비스 계정 JSON을 붙여넣거나 파일을 선택하세요:")
+        vtx_form.addRow(sa_label)
+
+        self._vertex_sa_json = QTextEdit()
+        self._vertex_sa_json.setPlaceholderText('{"type": "service_account", ...}')
+        self._vertex_sa_json.setMinimumHeight(120)
+        vtx_form.addRow(self._vertex_sa_json)
+
+        sa_browse_btn = QPushButton("JSON 파일 선택...")
+        sa_browse_btn.clicked.connect(self._browse_service_account)
+        vtx_form.addRow("", sa_browse_btn)
+
+        vtx_layout.addWidget(vtx_group)
+        layout.addWidget(self._gemini_vertex_widget)
 
         # 연결 테스트 버튼
         test_btn = QPushButton("연결 테스트")
         test_btn.clicked.connect(self._test_connection)
-        gemini_form.addRow("", test_btn)
+        layout.addWidget(test_btn)
+
+        # 엔드포인트 변경 시 인증 패널 전환
+        self._gemini_endpoint.currentTextChanged.connect(self._on_gemini_endpoint_changed)
+        self._gemini_vertex_widget.setVisible(False)  # 초기값: AI Studio
+
+        return widget
+
+    def _build_openai_panel(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        group = QGroupBox("OpenAI 설정")
+        form = QFormLayout(group)
+
+        self._openai_key = QLineEdit()
+        self._openai_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._openai_key.setPlaceholderText("sk-...")
+        form.addRow("API 키:", self._openai_key)
+
+        self._openai_model = QComboBox()
+        self._openai_model.addItems(["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"])
+        self._openai_model.setEditable(True)
+        form.addRow("모델:", self._openai_model)
 
         layout.addWidget(group)
-        layout.addWidget(gemini_group)
         layout.addStretch()
         return widget
+
+    def _build_claude_panel(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        group = QGroupBox("Claude 설정")
+        form = QFormLayout(group)
+
+        self._claude_key = QLineEdit()
+        self._claude_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._claude_key.setPlaceholderText("sk-ant-...")
+        form.addRow("API 키:", self._claude_key)
+
+        self._claude_model = QComboBox()
+        self._claude_model.addItems([
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+            "claude-3-5-sonnet-20241022",
+        ])
+        self._claude_model.setEditable(True)
+        form.addRow("모델:", self._claude_model)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return widget
+
+    def _build_ollama_panel(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        group = QGroupBox("Ollama 설정")
+        form = QFormLayout(group)
+
+        self._ollama_url = QLineEdit()
+        self._ollama_url.setPlaceholderText("http://localhost:11434")
+        form.addRow("서버 주소:", self._ollama_url)
+
+        self._ollama_model = QLineEdit()
+        self._ollama_model.setPlaceholderText("예: llama3, gemma2")
+        form.addRow("모델명:", self._ollama_model)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return widget
+
+    def _on_gemini_endpoint_changed(self, endpoint: str):
+        """Gemini 엔드포인트 변경 시 인증 패널을 전환합니다."""
+        is_vertex = (endpoint == "vertex")
+        self._gemini_ais_widget.setVisible(not is_vertex)
+        self._gemini_vertex_widget.setVisible(is_vertex)
+
+    def _browse_service_account(self):
+        """JSON 파일을 선택해 텍스트 에디터에 내용을 로드합니다."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "서비스 계정 JSON 선택", "", "JSON 파일 (*.json)"
+        )
+        if path:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    self._vertex_sa_json.setPlainText(f.read())
+            except Exception as e:
+                QMessageBox.warning(self, "파일 읽기 오류", f"파일을 읽을 수 없습니다:\n{e}")
 
     def _build_language_tab(self) -> QWidget:
         widget = QWidget()
@@ -213,7 +364,7 @@ class SettingsWindow(QDialog):
         if idx >= 0:
             self._provider_combo.setCurrentIndex(idx)
 
-        self._gemini_key.setText(c.get("provider.gemini.api_key", ""))
+        # Gemini
         model = c.get("provider.gemini.model", "gemini-2.0-flash")
         midx = self._gemini_model.findText(model)
         if midx >= 0:
@@ -225,6 +376,35 @@ class SettingsWindow(QDialog):
         eidx = self._gemini_endpoint.findText(endpoint)
         if eidx >= 0:
             self._gemini_endpoint.setCurrentIndex(eidx)
+
+        self._gemini_key.setText(c.get("provider.gemini.api_key", ""))
+
+        # Vertex AI
+        self._vertex_project_id.setText(c.get("provider.gemini.vertex.project_id", ""))
+        self._vertex_region.setText(c.get("provider.gemini.vertex.region", "us-central1"))
+        self._vertex_sa_json.setPlainText(c.get("provider.gemini.vertex.service_account", ""))
+
+        # OpenAI
+        self._openai_key.setText(c.get("provider.openai.api_key", ""))
+        oai_model = c.get("provider.openai.model", "gpt-4o")
+        oai_idx = self._openai_model.findText(oai_model)
+        if oai_idx >= 0:
+            self._openai_model.setCurrentIndex(oai_idx)
+        else:
+            self._openai_model.setCurrentText(oai_model)
+
+        # Claude
+        self._claude_key.setText(c.get("provider.claude.api_key", ""))
+        cl_model = c.get("provider.claude.model", "claude-sonnet-4-6")
+        cl_idx = self._claude_model.findText(cl_model)
+        if cl_idx >= 0:
+            self._claude_model.setCurrentIndex(cl_idx)
+        else:
+            self._claude_model.setCurrentText(cl_model)
+
+        # Ollama
+        self._ollama_url.setText(c.get("provider.ollama.base_url", "http://localhost:11434"))
+        self._ollama_model.setText(c.get("provider.ollama.model", ""))
 
         # 언어 탭
         src = c.get("language.source", "auto")
@@ -270,9 +450,26 @@ class SettingsWindow(QDialog):
 
         # 프로바이더
         c.set("provider.active", self._provider_combo.currentText())
-        c.set("provider.gemini.api_key", self._gemini_key.text())
+
+        # Gemini
         c.set("provider.gemini.model", self._gemini_model.currentText())
         c.set("provider.gemini.endpoint", self._gemini_endpoint.currentText())
+        c.set("provider.gemini.api_key", self._gemini_key.text())
+        c.set("provider.gemini.vertex.project_id", self._vertex_project_id.text())
+        c.set("provider.gemini.vertex.region", self._vertex_region.text())
+        c.set("provider.gemini.vertex.service_account", self._vertex_sa_json.toPlainText())
+
+        # OpenAI
+        c.set("provider.openai.api_key", self._openai_key.text())
+        c.set("provider.openai.model", self._openai_model.currentText())
+
+        # Claude
+        c.set("provider.claude.api_key", self._claude_key.text())
+        c.set("provider.claude.model", self._claude_model.currentText())
+
+        # Ollama
+        c.set("provider.ollama.base_url", self._ollama_url.text())
+        c.set("provider.ollama.model", self._ollama_model.text())
 
         # 언어
         c.set("language.source", self._source_lang.currentText())
@@ -292,24 +489,21 @@ class SettingsWindow(QDialog):
         c.set("display.mode", self._display_mode.currentText())
         c.set("display.active_preset", self._active_preset.currentText())
 
+        c.save()
         self.settings_saved.emit()
         self.accept()
 
     def _test_connection(self):
-        """현재 입력된 API 키로 연결을 테스트합니다."""
+        """현재 선택된 프로바이더로 연결을 테스트합니다."""
         import asyncio
 
-        api_key = self._gemini_key.text().strip()
-        if not api_key:
-            QMessageBox.warning(self, "연결 테스트", "API 키를 먼저 입력해주세요.")
-            return
+        provider_name = self._provider_combo.currentText()
 
-        from mallangmollang.providers.gemini import GeminiProvider
-        provider = GeminiProvider(
-            api_key=api_key,
-            model=self._gemini_model.currentText(),
-            endpoint=self._gemini_endpoint.currentText(),
-        )
+        try:
+            provider = self._create_test_provider(provider_name)
+        except ValueError as e:
+            QMessageBox.warning(self, "연결 테스트", str(e))
+            return
 
         try:
             loop = asyncio.new_event_loop()
@@ -324,3 +518,50 @@ class SettingsWindow(QDialog):
             QMessageBox.information(self, "연결 테스트", "연결에 성공했습니다! ✓")
         else:
             QMessageBox.warning(self, "연결 실패", "API 키 또는 설정을 확인해주세요.")
+
+    def _create_test_provider(self, provider_name: str):
+        """테스트용 프로바이더 인스턴스를 생성합니다."""
+        if provider_name == "gemini":
+            from mallangmollang.providers.gemini import GeminiProvider
+            endpoint = self._gemini_endpoint.currentText()
+            if endpoint == "vertex":
+                sa_json = self._vertex_sa_json.toPlainText().strip()
+                if not sa_json:
+                    raise ValueError("서비스 계정 JSON을 입력해주세요.")
+                return GeminiProvider(
+                    api_key="",
+                    model=self._gemini_model.currentText(),
+                    endpoint="vertex",
+                    vertex_project_id=self._vertex_project_id.text(),
+                    vertex_region=self._vertex_region.text() or "us-central1",
+                    service_account=sa_json,
+                )
+            else:
+                api_key = self._gemini_key.text().strip()
+                if not api_key:
+                    raise ValueError("API 키를 먼저 입력해주세요.")
+                return GeminiProvider(
+                    api_key=api_key,
+                    model=self._gemini_model.currentText(),
+                    endpoint="ai_studio",
+                )
+
+        elif provider_name == "openai":
+            api_key = self._openai_key.text().strip()
+            if not api_key:
+                raise ValueError("OpenAI API 키를 입력해주세요.")
+            # OpenAI 프로바이더가 구현되면 교체 — 현재 stub
+            raise ValueError("OpenAI 프로바이더는 아직 구현 중입니다.")
+
+        elif provider_name == "claude":
+            api_key = self._claude_key.text().strip()
+            if not api_key:
+                raise ValueError("Claude API 키를 입력해주세요.")
+            raise ValueError("Claude 프로바이더는 아직 구현 중입니다.")
+
+        elif provider_name == "ollama":
+            base_url = self._ollama_url.text().strip() or "http://localhost:11434"
+            raise ValueError("Ollama 프로바이더는 아직 구현 중입니다.")
+
+        else:
+            raise ValueError(f"알 수 없는 프로바이더: {provider_name}")
