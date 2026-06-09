@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from mallangmollang.infra.config import Config
+from mallangmollang.infra.hotkeys import HotkeyManager
 from mallangmollang.core.pipeline import Pipeline
 from mallangmollang.display.overlay import OverlayWindow
 from mallangmollang.display.area_indicator import AreaIndicatorWindow
@@ -19,6 +20,7 @@ from mallangmollang.ui.tray import TrayIcon
 from mallangmollang.ui.settings import SettingsWindow
 from mallangmollang.ui.region_selector import RegionSelector
 from mallangmollang.ui.control_panel import ControlPanel
+from mallangmollang.ui.toast import ToastManager
 
 
 class _Bridge(QObject):
@@ -48,6 +50,8 @@ class App:
         self.panel = ControlPanel()
         self.tray = TrayIcon()
         self.region_selector = RegionSelector()
+        self.hotkeys = HotkeyManager(self.config)
+        self.toast = ToastManager.get_instance()
         self.pipeline: Pipeline | None = None
 
         # asyncio 스레드 → Qt 메인 스레드 브리지
@@ -80,6 +84,10 @@ class App:
 
         self.region_selector.region_selected.connect(self._on_region_selected)
         self.region_selector.selection_cancelled.connect(self._on_region_cancelled)
+
+        # 전역 단축키
+        self.hotkeys.toggle_requested.connect(self._on_toggle)
+        self.hotkeys.region_requested.connect(self._on_region_select)
 
     def _is_provider_configured(self) -> bool:
         """현재 프로바이더가 최소한의 설정을 갖추고 있는지 확인합니다."""
@@ -130,6 +138,7 @@ class App:
             self.overlay.hide_translation()
         elif status == "error":
             self.panel.set_status("● 오류 발생", "rgba(220,50,50,220)")
+            self.toast.show("번역 중 오류가 발생했습니다.", "error")
 
     def _start_translation(self):
         """별도 스레드에서 asyncio 번역 루프를 시작합니다."""
@@ -139,16 +148,13 @@ class App:
         # 영역이 지정되지 않았으면 먼저 영역 선택
         region = self.config.get("capture.region")
         if not region:
-            self.tray.show_message("말랑몰랑", "번역 영역을 먼저 지정해주세요.")
+            self.toast.show("번역 영역을 먼저 지정해주세요.", "warning")
             self._on_region_select()
             return
 
         self.pipeline = self._build_pipeline()
         if self.pipeline is None:
-            self.tray.show_message(
-                "말랑몰랑",
-                "API 키가 설정되지 않았습니다. 설정 창에서 입력해주세요."
-            )
+            self.toast.show("API 키가 설정되지 않았습니다.", "error")
             self._on_settings()
             return
 
@@ -162,7 +168,7 @@ class App:
         self.indicator.set_status("idle")
         self.indicator.show()
 
-        self.tray.show_message("말랑몰랑", "번역을 시작합니다.")
+        self.toast.show("번역을 시작합니다.", "success")
 
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(
@@ -197,17 +203,14 @@ class App:
         self.panel.set_active(False)
         self.overlay.hide_translation()
         self.indicator.hide()
-        self.tray.show_message("말랑몰랑", "번역을 중지합니다.")
+        self.toast.show("번역을 중지합니다.", "info")
 
     def _ensure_pipeline(self) -> bool:
         """Pipeline이 없으면 생성합니다. 실패 시 False 반환."""
         if self.pipeline is None:
             self.pipeline = self._build_pipeline()
         if self.pipeline is None:
-            self.tray.show_message(
-                "말랑몰랑",
-                "API 키가 설정되지 않았습니다. 설정 창에서 입력해주세요."
-            )
+            self.toast.show("API 키가 설정되지 않았습니다.", "error")
             self._on_settings()
             return False
         return True
@@ -219,7 +222,7 @@ class App:
 
         region = self.config.get("capture.region")
         if not region:
-            self.tray.show_message("말랑몰랑", "번역 영역을 먼저 지정해주세요.")
+            self.toast.show("번역 영역을 먼저 지정해주세요.", "warning")
             self._on_region_select()
             return
 
@@ -305,7 +308,7 @@ class App:
         """영역 선택 완료 후 Config를 저장합니다."""
         x, y, w, h = region
         self.config.set("capture.region", [x, y, w, h])
-        self.tray.show_message("말랑몰랑", f"영역 설정 완료: {w}×{h}")
+        self.toast.show(f"영역 설정 완료: {w}×{h}", "success")
         if self._running:
             self.indicator.set_region(x, y, w, h)
         self.panel.show()
@@ -316,7 +319,7 @@ class App:
     def _on_region_cancelled(self):
         """영역 선택이 취소되면 패널을 복원합니다."""
         self.panel.show()
-        self.tray.show_message("말랑몰랑", "영역 선택이 취소되었습니다.")
+        self.toast.show("영역 선택이 취소되었습니다.", "info")
 
     def _show_panel(self):
         """컨트롤 패널을 화면에 표시합니다."""
@@ -357,23 +360,17 @@ class App:
         mode = self.config.get("translation.run_mode", "realtime")
         self.panel.set_mode(mode)
         self.panel.show()
+        self.hotkeys.start()
 
         # 최초 실행 또는 API 키 미설정이면 설정 창 표시
         first_run = self.config.get("app.first_run", True)
 
         if first_run or not self._is_provider_configured():
             self.config.set("app.first_run", False)
-            self.tray.show_message(
-                "말랑몰랑에 오신 것을 환영합니다!",
-                "설정에서 API 키를 입력하고 번역 영역을 지정해주세요."
-            )
+            self.toast.show("API 키를 설정하고 번역 영역을 지정해주세요.", "info", 5000)
             self._on_settings()
         elif not self.config.get("capture.region"):
-            # 프로바이더는 설정됐지만 캡처 영역이 없으면 영역 선택 안내
-            self.tray.show_message(
-                "말랑몰랑",
-                "트레이 아이콘을 우클릭 → '영역 재지정'으로 번역 영역을 지정해주세요."
-            )
+            self.toast.show("영역 버튼을 눌러 번역 영역을 지정해주세요.", "info", 5000)
 
         return self.qt_app.exec()
 
