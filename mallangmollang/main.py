@@ -291,11 +291,12 @@ class App:
             # snapshot 모드에서는 자동 시작하지 않음 — 사용자가 직접 클릭
 
     def _on_settings_saved(self):
-        """설정 저장 후 오버레이 프리셋과 패널 모드를 갱신합니다."""
+        """설정 저장 후 오버레이 프리셋, 패널 모드, 단축키를 갱신합니다."""
         preset_name = self.config.get("display.active_preset", "기본")
         self.overlay.set_preset(get_preset_by_name(preset_name))
         mode = self.config.get("translation.run_mode", "realtime")
         self.panel.set_mode(mode)
+        self.hotkeys.reload()
 
     def _on_region_select(self):
         """영역 선택 UI를 시작합니다. 패널을 숨겨서 간섭을 방지합니다."""

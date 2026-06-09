@@ -49,6 +49,7 @@ class SettingsWindow(QDialog):
         self._tabs.addTab(self._build_capture_tab(), "캡처")
         self._tabs.addTab(self._build_translation_tab(), "번역")
         self._tabs.addTab(self._build_display_tab(), "표시")
+        self._tabs.addTab(self._build_hotkeys_tab(), "단축키")
         layout.addWidget(self._tabs)
 
         # 하단 버튼
@@ -394,6 +395,35 @@ class SettingsWindow(QDialog):
         layout.addStretch()
         return widget
 
+    def _build_hotkeys_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        group = QGroupBox("전역 단축키")
+        form = QFormLayout(group)
+
+        self._hotkey_toggle = QLineEdit()
+        self._hotkey_toggle.setPlaceholderText("<ctrl>+<shift>+t")
+        self._hotkey_toggle.setToolTip(
+            "pynput 형식으로 입력하세요.\n"
+            "예: <ctrl>+<shift>+t  /  <alt>+t\n"
+            "특수 키: <ctrl> <shift> <alt> <cmd> <f1>~<f12>"
+        )
+        form.addRow("번역 시작/중지:", self._hotkey_toggle)
+
+        self._hotkey_region = QLineEdit()
+        self._hotkey_region.setPlaceholderText("<ctrl>+<shift>+r")
+        self._hotkey_region.setToolTip(self._hotkey_toggle.toolTip())
+        form.addRow("영역 선택:", self._hotkey_region)
+
+        notice = QLabel("※ 변경 후 저장하면 즉시 적용됩니다.")
+        notice.setStyleSheet("color: gray; font-size: 11px;")
+
+        layout.addWidget(group)
+        layout.addWidget(notice)
+        layout.addStretch()
+        return widget
+
     def _build_display_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -516,6 +546,10 @@ class SettingsWindow(QDialog):
         if pidx >= 0:
             self._active_preset.setCurrentIndex(pidx)
 
+        # 단축키 탭
+        self._hotkey_toggle.setText(c.get("hotkeys.toggle_translation", "<ctrl>+<shift>+t"))
+        self._hotkey_region.setText(c.get("hotkeys.select_region", "<ctrl>+<shift>+r"))
+
     def _save(self):
         """UI 값을 Config에 저장하고 창을 닫습니다."""
         c = self.config
@@ -561,6 +595,12 @@ class SettingsWindow(QDialog):
         # 표시
         c.set("display.mode", self._display_mode.currentText())
         c.set("display.active_preset", self._active_preset.currentText())
+
+        # 단축키
+        toggle_key = self._hotkey_toggle.text().strip() or "<ctrl>+<shift>+t"
+        region_key = self._hotkey_region.text().strip() or "<ctrl>+<shift>+r"
+        c.set("hotkeys.toggle_translation", toggle_key)
+        c.set("hotkeys.select_region", region_key)
 
         c.save()
         self.settings_saved.emit()
