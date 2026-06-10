@@ -172,8 +172,9 @@ class OcrEngine:
         preprocess: bool = True,
     ) -> list[LineBox]:
         """
-        이미지에서 줄 단위 바운딩 박스를 추출합니다.
-        오버레이가 원문 위에 번역문을 덮어 쓸 때 사용합니다.
+        이미지에서 문단 인식 기반 바운딩 박스를 추출합니다.
+        같은 문단(block+paragraph)에 속하는 줄은 하나로 합쳐서 반환합니다.
+        → 목록은 줄 단위 유지, 줄글(문단)은 하나의 블록으로 처리.
 
         Args:
             image: 캡처된 PIL 이미지
@@ -181,9 +182,8 @@ class OcrEngine:
             preprocess: 전처리 적용 여부
 
         Returns:
-            줄 단위 LineBox 리스트
+            LineBox 리스트 (문단 내 줄이 합쳐진 상태)
         """
-        # --- 언어 자동 감지 (extract_text와 동일 로직) ---
         if lang == "auto":
             self._osd_cycle_count += 1
             if self._cached_lang is None or self._osd_cycle_count >= _OSD_REDETECT_INTERVAL:
@@ -191,14 +191,12 @@ class OcrEngine:
                 self._osd_cycle_count = 0
             lang = self._cached_lang
 
-        # --- 전처리 ---
         if preprocess:
             processed = self._preprocess(image)
         else:
             img = np.array(image)
             processed = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if len(img.shape) == 3 else img
 
-        # --- Tesseract 데이터 추출 ---
         data = pytesseract.image_to_data(
             processed,
             lang=lang,
@@ -207,71 +205,92 @@ class OcrEngine:
 
         n = len(data["text"])
 
-        # --- 줄(level==4) 인덱스 수집 ---
         # Tesseract level: 1=page, 2=block, 3=paragraph, 4=line, 5=word
-        line_indices: list[int] = []
-        for i in range(n):
-            if data["level"][i] == 4:
-                line_indices.append(i)
+        # 줄(level==4) 데이터를 문단(block_num+par_num) 기준으로 그룹화
+        para_groups: dict[tuple[int, int], list[dict]] = {}
 
-        lines: list[LineBox] = []
+        line_indices = [i for i in range(n) if data["level"][i] == 4]
 
         for li, line_idx in enumerate(line_indices):
-            line_block = data["block_num"][line_idx]
-            line_par = data["par_num"][line_idx]
-            line_num = data["line_num"][line_idx]
+            blk = data["block_num"][line_idx]
+            par = data["par_num"][line_idx]
+            ln = data["line_num"][line_idx]
 
-            # 이 줄에 속하는 단어(level==5) 범위 결정
-            # 다음 줄 인덱스까지 또는 데이터 끝까지 탐색
             end = line_indices[li + 1] if li + 1 < len(line_indices) else n
 
-            words: list[str] = []
-            confs: list[float] = []
-
+            words = []
+            confs = []
             for wi in range(line_idx + 1, end):
                 if data["level"][wi] != 5:
                     continue
-                # 같은 블록/문단/줄에 속하는 단어만 수집
-                if (data["block_num"][wi] != line_block
-                        or data["par_num"][wi] != line_par
-                        or data["line_num"][wi] != line_num):
+                if (data["block_num"][wi] != blk
+                        or data["par_num"][wi] != par
+                        or data["line_num"][wi] != ln):
                     continue
-
                 word = data["text"][wi].strip()
                 conf = float(data["conf"][wi])
-
                 if word and conf >= 0:
                     words.append(word)
                     confs.append(conf)
 
-            # 유효한 단어가 없는 줄은 건너뜀
             if not words:
                 continue
 
-            # 줄 바운딩 박스 정보 (level==4 행에서 가져옴)
-            lx = int(data["left"][line_idx])
-            ly = int(data["top"][line_idx])
-            lw = int(data["width"][line_idx])
-            lh = int(data["height"][line_idx])
+            key = (blk, par)
+            if key not in para_groups:
+                para_groups[key] = []
 
-            avg_conf = sum(confs) / len(confs)
+            para_groups[key].append({
+                "text": " ".join(words),
+                "x": int(data["left"][line_idx]),
+                "y": int(data["top"][line_idx]),
+                "w": int(data["width"][line_idx]),
+                "h": int(data["height"][line_idx]),
+                "conf": sum(confs) / len(confs),
+            })
 
-            # 폰트 크기 추정: 줄 높이(px) → pt 변환 (96 DPI 기준, 행간 1.2 가정)
-            font_pt = round(lh * 72 / 96 / 1.2)
-            font_pt = max(font_pt, 1)  # 최소 1pt
+        # 각 문단 그룹을 LineBox로 변환
+        results: list[LineBox] = []
 
-            lines.append(LineBox(
-                text=" ".join(words),
-                x=lx,
-                y=ly,
-                width=lw,
-                height=lh,
-                confidence=avg_conf,
-                font_pt=font_pt,
-            ))
+        for (blk, par), group_lines in para_groups.items():
+            if len(group_lines) == 1:
+                # 단일 줄 — 그대로 사용
+                gl = group_lines[0]
+                font_pt = max(1, round(gl["h"] * 72 / 96 / 1.2))
+                results.append(LineBox(
+                    text=gl["text"],
+                    x=gl["x"], y=gl["y"],
+                    width=gl["w"], height=gl["h"],
+                    confidence=gl["conf"],
+                    font_pt=font_pt,
+                ))
+            else:
+                # 여러 줄 → 하나의 블록으로 합침
+                merged_text = " ".join(gl["text"] for gl in group_lines)
+                min_x = min(gl["x"] for gl in group_lines)
+                min_y = min(gl["y"] for gl in group_lines)
+                max_right = max(gl["x"] + gl["w"] for gl in group_lines)
+                max_bottom = max(gl["y"] + gl["h"] for gl in group_lines)
+                avg_conf = sum(gl["conf"] for gl in group_lines) / len(group_lines)
 
-        # --- 인접/겹치는 줄 병합 ---
-        return self._merge_overlapping_lines(lines)
+                merged_w = max_right - min_x
+                merged_h = max_bottom - min_y
+
+                # 폰트 크기: 개별 줄 높이의 평균 사용 (전체 높이가 아님)
+                avg_line_h = sum(gl["h"] for gl in group_lines) / len(group_lines)
+                font_pt = max(1, round(avg_line_h * 72 / 96 / 1.2))
+
+                results.append(LineBox(
+                    text=merged_text,
+                    x=min_x, y=min_y,
+                    width=merged_w, height=merged_h,
+                    confidence=avg_conf,
+                    font_pt=font_pt,
+                ))
+
+        # y 좌표 기준 정렬 후 겹침 병합
+        results.sort(key=lambda lb: lb.y)
+        return self._merge_overlapping_lines(results)
 
     def _merge_overlapping_lines(self, lines: list[LineBox]) -> list[LineBox]:
         """
