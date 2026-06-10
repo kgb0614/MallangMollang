@@ -200,22 +200,39 @@ class Pipeline:
             line_texts = [lb.text for lb in line_boxes]
             translated_lines = await self.translator.translate_lines(line_texts)
 
-            line_trans = [
-                LineTranslation(line_box=lb, translated=t)
-                for lb, t in zip(line_boxes, translated_lines)
-            ]
-
-            combined_translated = "\n".join(translated_lines)
-
-            if self.cache:
-                self.cache.store(combined_text, combined_translated)
-
-            pipeline_result = PipelineResult(
-                capture=capture_result,
-                ocr=None,
-                translation=TranslationResult(translated=combined_translated),
-                line_translations=line_trans,
+            # 줄 매핑 품질 검사 — 절반 이상이 비어있으면 블록 모드로 폴백
+            nonempty_count = sum(1 for t in translated_lines if t.strip())
+            use_block_fallback = (
+                len(translated_lines) > 1
+                and nonempty_count <= max(1, len(translated_lines) * 0.5)
             )
+
+            if use_block_fallback:
+                # 첫 번째 비어있지 않은 줄을 전체 번역으로 사용
+                combined_translated = " ".join(t for t in translated_lines if t.strip())
+                print(f"[Pipeline] 줄 매핑 실패 → 블록 모드 폴백 (비어있지 않은 줄: {nonempty_count}/{len(translated_lines)})")
+                if self.cache:
+                    self.cache.store(combined_text, combined_translated)
+                pipeline_result = PipelineResult(
+                    capture=capture_result,
+                    ocr=None,
+                    translation=TranslationResult(translated=combined_translated),
+                    line_translations=None,
+                )
+            else:
+                line_trans = [
+                    LineTranslation(line_box=lb, translated=t)
+                    for lb, t in zip(line_boxes, translated_lines)
+                ]
+                combined_translated = "\n".join(translated_lines)
+                if self.cache:
+                    self.cache.store(combined_text, combined_translated)
+                pipeline_result = PipelineResult(
+                    capture=capture_result,
+                    ocr=None,
+                    translation=TranslationResult(translated=combined_translated),
+                    line_translations=line_trans,
+                )
 
         # 6. 결과 콜백 (Display 연결용)
         if self._on_result:
