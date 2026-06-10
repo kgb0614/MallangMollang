@@ -407,6 +407,12 @@ class App:
 
 def main():
     """말랑몰랑 진입점."""
+    # --debug 플래그: 오버레이가 스크린샷에 잡히도록 허용
+    if "--debug" in sys.argv:
+        from mallangmollang.display.area_indicator import set_debug_capture
+        set_debug_capture(True)
+        sys.argv.remove("--debug")
+
     qt_app = QApplication(sys.argv)
     qt_app.setQuitOnLastWindowClosed(False)  # 창을 닫아도 트레이에 계속 상주
 
