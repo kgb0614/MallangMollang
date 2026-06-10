@@ -1,24 +1,37 @@
 """
 오버레이 창 모듈
-번역 결과를 캡처 영역 위에 반투명 배경으로 겹쳐서 표시합니다.
+번역 결과를 캡처 영역 위에 줄 단위로 덮어씌워 표시합니다.
+
+표시 모드:
+- line: 각 OCR 줄 위치에 불투명 배경 + 번역 텍스트 (기본, MORT 스타일)
+- block: 캡처 영역 전체에 반투명 배경 + 번역 텍스트 (기존 방식)
 
 특징:
 - 캡처 영역과 동일한 위치/크기로 정확히 겹침
-- 테두리 없음 (FramelessWindowHint)
-- 배경 투명 (WA_TranslucentBackground)
-- 항상 최상위 (WindowStaysOnTopHint)
 - 마우스 클릭 투과 (WA_TransparentForMouseEvents)
 - SetWindowDisplayAffinity로 mss 캡처에서 제외 (피드백 루프 방지)
 """
 
 import sys
+from dataclasses import dataclass
 
-from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QApplication
-from PyQt6.QtCore import Qt, QTimer, QPoint, QRect
-from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QPainterPath
+from PyQt6.QtWidgets import QWidget, QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QFontMetrics
 
 from mallangmollang.display.presets import OverlayPreset, PRESET_DEFAULT
 from mallangmollang.display.area_indicator import _exclude_from_screen_capture
+
+
+@dataclass
+class TranslatedLine:
+    """오버레이에 표시할 번역 줄 정보"""
+    text: str        # 번역된 텍스트
+    x: int           # 캡처 영역 내 상대 좌표
+    y: int
+    width: int
+    height: int
+    font_pt: int     # OCR에서 추정한 폰트 크기
 
 
 class OverlayWindow(QWidget):
@@ -26,80 +39,53 @@ class OverlayWindow(QWidget):
     번역 결과를 표시하는 투명 오버레이 창.
 
     사용 예시:
-        app = QApplication([])
         overlay = OverlayWindow()
-        overlay.show_translation("번역 결과입니다", position=(100, 200))
+        overlay.show_lines(lines, region=(100, 200, 800, 400))
     """
 
     def __init__(self, preset: OverlayPreset | None = None, parent=None):
         super().__init__(parent)
         self.preset = preset or PRESET_DEFAULT
         self._text = ""
-
+        self._lines: list[TranslatedLine] = []
         self._current_region: tuple[int, int, int, int] | None = None
+        self._mode = "line"  # "line" | "block"
 
         self._setup_window()
-        self._setup_ui()
 
     def showEvent(self, event):
         super().showEvent(event)
         _exclude_from_screen_capture(int(self.winId()))
 
     def _setup_window(self):
-        """창 속성 설정: 투명 + 항상 최상위 + 클릭 투과"""
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint          # 테두리 제거
-            | Qt.WindowType.WindowStaysOnTopHint       # 항상 최상위
-            | Qt.WindowType.Tool                       # 작업표시줄 미표시
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)      # 배경 투명
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)   # 클릭 투과
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)      # 포커스 없이 표시
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
-    def _setup_ui(self):
-        """레이블과 레이아웃 초기화"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+    def show_lines(
+        self,
+        lines: list[TranslatedLine],
+        region: tuple[int, int, int, int] | None = None,
+    ):
+        """줄 단위 번역 결과를 각 위치에 덮어씌워 표시합니다."""
+        self._lines = lines
+        self._text = ""
+        self._mode = "line"
 
-        self._label = QLabel(self)
-        self._label.setWordWrap(True)
-        self._label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self._label)
+        if region is not None:
+            x, y, w, h = region
+            self._current_region = region
+            self.setFixedSize(w, h)
+            self.move(x, y)
 
-        self._apply_preset()
-
-    def _apply_preset(self):
-        """현재 프리셋을 레이블에 적용합니다."""
-        p = self.preset
-
-        font = QFont(p.font_family, p.font_size)
-        font.setBold(p.font_bold)
-        self._label.setFont(font)
-
-        r, g, b, a = p.text_color
-        text_rgba = f"rgba({r},{g},{b},{a/255:.2f})"
-
-        tr, tg, tb, ta = p.bg_color
-        bg_rgba = f"rgba({tr},{tg},{tb},{ta/255:.2f})"
-
-        padding = p.padding
-        radius = p.border_radius
-
-        style = (
-            f"QLabel {{"
-            f"  color: {text_rgba};"
-            f"  background-color: {bg_rgba};"
-            f"  padding: {padding}px;"
-            f"  border-radius: {radius}px;"
-        )
-
-        # 외곽선: QLabel에서는 CSS text-stroke가 없으므로 배경 대비로 처리
-        if p.outline:
-            or_, og, ob, oa = p.outline_color
-            style += f"  border: 1px solid rgba({or_},{og},{ob},{oa/255:.2f});"
-
-        style += "}"
-        self._label.setStyleSheet(style)
+        self.update()
+        if not self.isVisible():
+            self.show()
 
     def show_translation(
         self,
@@ -107,16 +93,10 @@ class OverlayWindow(QWidget):
         position: tuple[int, int] | None = None,
         region: tuple[int, int, int, int] | None = None,
     ):
-        """
-        번역 텍스트를 캡처 영역 위에 겹쳐서 표시합니다.
-
-        Args:
-            text: 표시할 번역 텍스트
-            position: (x, y) 절대 좌표. None이면 현재 위치 유지.
-            region: (x, y, w, h) 캡처 영역. 이 영역과 동일한 위치/크기로 겹침.
-        """
+        """블록 모드: 캡처 영역 전체에 번역 텍스트를 표시합니다 (기존 방식)."""
         self._text = text
-        self._label.setText(text)
+        self._lines = []
+        self._mode = "block"
 
         if region is not None:
             x, y, w, h = region
@@ -126,18 +106,106 @@ class OverlayWindow(QWidget):
         elif position is not None:
             self.move(position[0], position[1])
 
+        self.update()
         if not self.isVisible():
             self.show()
 
     def hide_translation(self):
-        """오버레이를 숨깁니다."""
         self.hide()
 
     def set_preset(self, preset: OverlayPreset):
-        """프리셋을 변경하고 즉시 적용합니다."""
         self.preset = preset
-        self._apply_preset()
+        self.update()
 
     def update_position(self, x: int, y: int):
-        """오버레이 위치를 변경합니다."""
         self.move(x, y)
+
+    def paintEvent(self, event):
+        if self._mode == "line" and self._lines:
+            self._paint_lines()
+        elif self._mode == "block" and self._text:
+            self._paint_block()
+
+    def _paint_lines(self):
+        """각 줄 위치에 불투명 배경 + 번역 텍스트를 그립니다."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+
+        p = self.preset
+        bg = QColor(*p.bg_color)
+        text_color = QColor(*p.text_color)
+
+        for line in self._lines:
+            if not line.text.strip():
+                continue
+
+            # 폰트 크기 설정 — OCR 추정값 사용, 최소 8pt
+            font_size = max(8, line.font_pt)
+            font = QFont(p.font_family, font_size)
+            font.setBold(p.font_bold)
+            painter.setFont(font)
+
+            metrics = QFontMetrics(font)
+            text_width = metrics.horizontalAdvance(line.text)
+            text_height = metrics.height()
+
+            # 배경 영역: OCR 바운딩 박스 기준, 텍스트가 길면 확장
+            box_w = max(line.width, text_width + 6)
+            box_h = max(line.height, text_height + 2)
+
+            # 불투명 배경 그리기
+            bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), max(bg.alpha(), 220))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(bg_opaque))
+            painter.drawRoundedRect(line.x, line.y, box_w, box_h, 2, 2)
+
+            # 텍스트 그리기 — 외곽선이 있으면 먼저 그림
+            if p.outline:
+                outline_color = QColor(*p.outline_color)
+                painter.setPen(QPen(outline_color, 2))
+                offsets = [(-1, -1), (-1, 1), (1, -1), (1, 1)]
+                for dx, dy in offsets:
+                    painter.drawText(
+                        line.x + 3 + dx,
+                        line.y + metrics.ascent() + 1 + dy,
+                        line.text,
+                    )
+
+            painter.setPen(QPen(text_color))
+            painter.drawText(
+                line.x + 3,
+                line.y + metrics.ascent() + 1,
+                line.text,
+            )
+
+        painter.end()
+
+    def _paint_block(self):
+        """블록 모드: 전체 영역에 반투명 배경 + 텍스트 (기존 방식)."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+
+        p = self.preset
+        bg = QColor(*p.bg_color)
+        text_color = QColor(*p.text_color)
+        font = QFont(p.font_family, p.font_size)
+        font.setBold(p.font_bold)
+        painter.setFont(font)
+
+        # 배경
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(bg))
+        painter.drawRoundedRect(self.rect(), p.border_radius, p.border_radius)
+
+        # 텍스트
+        painter.setPen(QPen(text_color))
+        text_rect = self.rect().adjusted(p.padding, p.padding, -p.padding, -p.padding)
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+            self._text,
+        )
+
+        painter.end()

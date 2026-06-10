@@ -149,6 +149,36 @@ class Translator:
         """현재 저장된 문맥 기록을 반환합니다."""
         return list(self._context)
 
+    async def translate_lines(
+        self,
+        lines: list[str],
+        params: TranslateParams | None = None,
+    ) -> list[str]:
+        """OCR 텍스트를 줄 단위로 번역합니다 (오버레이 1:1 매핑용)."""
+        if params is None:
+            params = TranslateParams()
+
+        system_hint = self._build_line_system_hint(params.system_hint)
+        prompt = self._build_line_prompt(lines)
+
+        result = await self.provider.translate(
+            prompt,
+            TranslateParams(
+                temperature=params.temperature,
+                max_tokens=params.max_tokens,
+                system_hint=system_hint,
+            ),
+        )
+
+        translated_lines = self._parse_line_response(result.translated, len(lines))
+
+        # 문맥에 원문/번역을 합쳐서 저장
+        joined_source = "\n".join(lines)
+        joined_translated = "\n".join(translated_lines)
+        self._context.append(ContextEntry(source=joined_source, translated=joined_translated))
+
+        return translated_lines
+
     # ── 프롬프트 조립 ──
 
     def _build_system_hint(self, extra_hint: str = "") -> str:
@@ -221,6 +251,62 @@ class Translator:
         parts.append("이 이미지에 포함된 텍스트를 번역해 주세요.")
 
         return "\n".join(parts)
+
+    def _build_line_system_hint(self, extra_hint: str = "") -> str:
+        """줄 단위 번역용 시스템 프롬프트를 조립합니다."""
+        target_name = _LANG_NAMES.get(self.target_lang, self.target_lang)
+
+        hint = (
+            "당신은 화면 번역 도우미입니다.\n"
+            "아래 텍스트는 OCR(광학 문자 인식)로 추출한 것이라 오타나 오인식이 있을 수 있습니다.\n\n"
+            "작업:\n"
+            "1. 각 줄의 OCR 오류를 문맥에 맞게 교정하세요.\n"
+            f"2. 교정된 원문을 {target_name}(으)로 자연스럽게 번역하세요.\n"
+            "3. 반드시 입력과 동일한 줄 수만큼, 동일한 번호 형식으로 응답하세요.\n\n"
+            "응답 형식 (번호| 번역 결과):\n"
+            "1| 번역된 첫 번째 줄\n"
+            "2| 번역된 두 번째 줄\n"
+            "...\n\n"
+            "주의: 줄을 합치거나 나누지 마세요. 입력이 N줄이면 출력도 반드시 N줄이어야 합니다."
+        )
+
+        if extra_hint:
+            hint += f"\n\n추가 지시: {extra_hint}"
+
+        return hint
+
+    def _build_line_prompt(self, lines: list[str]) -> str:
+        """줄 번호를 붙인 사용자 프롬프트를 조립합니다."""
+        parts: list[str] = []
+
+        # 이전 문맥이 있으면 포함
+        if self._context:
+            parts.append("이전 대화 맥락:")
+            for entry in self._context:
+                parts.append(f"- 원문: {entry.source}")
+                parts.append(f"  번역: {entry.translated}")
+            parts.append("")
+
+        # 각 줄에 번호 부여
+        numbered = "\n".join(f"{i + 1}| {line}" for i, line in enumerate(lines))
+        parts.append(f"현재 텍스트:\n{numbered}")
+
+        return "\n".join(parts)
+
+    def _parse_line_response(self, response: str, expected_count: int) -> list[str]:
+        """LLM 응답에서 번호별 번역 결과를 파싱합니다."""
+        # "번호| 번역" 패턴으로 파싱 시도
+        matches = re.findall(r"^\d+\|\s*(.+)$", response, re.MULTILINE)
+        if len(matches) == expected_count:
+            return matches
+
+        # 패턴 실패 시 비어있지 않은 줄로 분할 시도
+        nonempty = [line.strip() for line in response.splitlines() if line.strip()]
+        if len(nonempty) >= expected_count:
+            return nonempty[:expected_count]
+
+        # 최종 폴백: 전체 응답을 모든 줄에 반복
+        return [response.strip()] * expected_count
 
 
 def _parse_response(response: str, fallback_source: str = "") -> tuple[str, str]:

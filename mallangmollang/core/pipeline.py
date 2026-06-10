@@ -12,10 +12,17 @@ from PIL import Image
 from mallangmollang.core.capture import ScreenCapture, CaptureResult
 from mallangmollang.core.detector import ChangeDetector
 from mallangmollang.core.cache import TranslationCache
-from mallangmollang.core.ocr import OcrEngine, OcrResult
+from mallangmollang.core.ocr import OcrEngine, OcrResult, LineBox
 from mallangmollang.core.translator import Translator
 from mallangmollang.infra.config import Config
 from mallangmollang.providers.base import TranslationResult
+
+
+@dataclass
+class LineTranslation:
+    """줄 단위 번역 결과 — 오버레이 덮어쓰기에 사용"""
+    line_box: LineBox        # OCR에서 추출한 줄 위치/크기
+    translated: str          # 해당 줄의 번역 텍스트
 
 
 @dataclass
@@ -24,6 +31,7 @@ class PipelineResult:
     capture: CaptureResult                     # 캡처 결과
     ocr: OcrResult | None                      # OCR 결과 (Vision 모드에서는 None)
     translation: TranslationResult | None      # 번역 결과 (스킵 시 None)
+    line_translations: list[LineTranslation] | None = None  # 줄 단위 번역 결과
     skipped: bool = False                      # 변경 감지에서 스킵되었는지
     cached: bool = False                       # 캐시 히트인지
 
@@ -148,46 +156,65 @@ class Pipeline:
                 translation=translation,
             )
         else:
-            # 경로 A: OCR + LLM
-            ocr_lang = self.config.get("language.ocr_lang", "eng")
-            ocr_result = self.ocr.extract_text(capture_result.image, lang=ocr_lang)
+            # 경로 A: OCR + LLM (줄 단위)
+            ocr_lang = self.config.get("language.ocr_lang", "auto")
+            line_boxes = self.ocr.extract_lines(capture_result.image, lang=ocr_lang)
 
-            # OCR 텍스트가 비어있으면 번역 스킵
-            if not ocr_result.text.strip():
+            if not line_boxes:
                 return PipelineResult(
                     capture=capture_result,
-                    ocr=ocr_result,
+                    ocr=None,
                     translation=None,
                     skipped=True,
                 )
 
-            # 4. 캐시 확인 — 동일 텍스트면 API 호출 없이 즉시 반환 (PRD F4-1)
+            # 줄 텍스트 합쳐서 캐시 키로 사용
+            combined_text = "\n".join(lb.text for lb in line_boxes)
+
+            # 4. 캐시 확인
             if self.cache:
-                cache_result = self.cache.lookup(ocr_result.text)
+                cache_result = self.cache.lookup(combined_text)
                 if cache_result.hit:
                     from mallangmollang.providers.base import TranslationResult as TR
+                    cached_lines = cache_result.translated.split("\n")
+                    # 줄 수가 맞지 않으면 마지막 줄을 반복
+                    while len(cached_lines) < len(line_boxes):
+                        cached_lines.append(cached_lines[-1] if cached_lines else "")
+                    line_trans = [
+                        LineTranslation(line_box=lb, translated=t)
+                        for lb, t in zip(line_boxes, cached_lines)
+                    ]
                     cached_translation = TR(translated=cache_result.translated)
                     pipeline_result = PipelineResult(
                         capture=capture_result,
-                        ocr=ocr_result,
+                        ocr=None,
                         translation=cached_translation,
+                        line_translations=line_trans,
                         cached=True,
                     )
                     if self._on_result:
                         self._on_result(pipeline_result)
                     return pipeline_result
 
-            # 5. LLM 번역
-            translation = await self.translator.translate_text(ocr_result.text)
+            # 5. LLM 줄 단위 번역
+            line_texts = [lb.text for lb in line_boxes]
+            translated_lines = await self.translator.translate_lines(line_texts)
 
-            # 번역 결과를 캐시에 저장 (PRD F4-1)
+            line_trans = [
+                LineTranslation(line_box=lb, translated=t)
+                for lb, t in zip(line_boxes, translated_lines)
+            ]
+
+            combined_translated = "\n".join(translated_lines)
+
             if self.cache:
-                self.cache.store(ocr_result.text, translation.translated)
+                self.cache.store(combined_text, combined_translated)
 
             pipeline_result = PipelineResult(
                 capture=capture_result,
-                ocr=ocr_result,
-                translation=translation,
+                ocr=None,
+                translation=TranslationResult(translated=combined_translated),
+                line_translations=line_trans,
             )
 
         # 6. 결과 콜백 (Display 연결용)

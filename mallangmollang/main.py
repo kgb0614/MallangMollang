@@ -29,6 +29,7 @@ class _Bridge(QObject):
     Qt 위젯은 메인 스레드에서만 접근해야 하므로, 시그널을 통해 전달합니다.
     """
     translation_ready = pyqtSignal(str, object)   # (번역 텍스트, 캡처 영역)
+    lines_ready = pyqtSignal(object, object)       # (줄 번역 리스트, 캡처 영역)
     status_changed = pyqtSignal(str)               # "idle" | "translating" | "error"
     error_detail = pyqtSignal(str)                 # 에러 상세 메시지
 
@@ -58,6 +59,7 @@ class App:
         # asyncio 스레드 → Qt 메인 스레드 브리지
         self._bridge = _Bridge()
         self._bridge.translation_ready.connect(self._on_translation_ready)
+        self._bridge.lines_ready.connect(self._on_lines_ready)
         self._bridge.status_changed.connect(self._on_status_changed)
         self._bridge.error_detail.connect(self._on_error_detail)
 
@@ -114,13 +116,16 @@ class App:
 
         pipeline = Pipeline.from_config(self.config)
 
-        # 번역 결과를 브리지 시그널로 메인 스레드에 전달 (스레드 안전)
         def on_result(result):
-            if result.translation and result.translation.translated:
-                region = self.config.get("capture.region")
+            region = self.config.get("capture.region")
+            region_tuple = tuple(region) if region else None
+
+            # 줄 단위 번역 결과가 있으면 줄 모드로 전달
+            if result.line_translations:
+                self._bridge.lines_ready.emit(result.line_translations, region_tuple)
+            elif result.translation and result.translation.translated:
                 self._bridge.translation_ready.emit(
-                    result.translation.translated,
-                    tuple(region) if region else None,
+                    result.translation.translated, region_tuple,
                 )
 
         pipeline.on_result(on_result)
@@ -129,8 +134,25 @@ class App:
         return pipeline
 
     def _on_translation_ready(self, text: str, region):
-        """메인 스레드에서 오버레이를 업데이트합니다."""
+        """블록 모드: 전체 번역 텍스트를 오버레이에 표시합니다."""
         self.overlay.show_translation(text, region=region)
+
+    def _on_lines_ready(self, line_translations, region):
+        """줄 단위 모드: 각 줄 위치에 번역을 덮어씌웁니다."""
+        from mallangmollang.display.overlay import TranslatedLine
+
+        lines = [
+            TranslatedLine(
+                text=lt.translated,
+                x=lt.line_box.x,
+                y=lt.line_box.y,
+                width=lt.line_box.width,
+                height=lt.line_box.height,
+                font_pt=lt.line_box.font_pt,
+            )
+            for lt in line_translations
+        ]
+        self.overlay.show_lines(lines, region=region)
 
     def _on_status_changed(self, status: str):
         """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""

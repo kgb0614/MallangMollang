@@ -7,7 +7,7 @@
 import sys
 
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
 from PyQt6.QtGui import QPainter, QColor, QPen
 
 _BORDER_WIDTH = 3
@@ -50,6 +50,11 @@ class AreaIndicatorWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._status = "idle"
+        # 펄스 애니메이션용 불투명도 값 (0.3 ~ 1.0)
+        self._pulse_value: float = 1.0
+        # 펄스 방향 추적: True면 밝아지는 중, False면 어두워지는 중
+        self._pulse_forward: bool = True
+        self._pulse_anim: QPropertyAnimation | None = None
         self._setup_window()
 
     def _setup_window(self) -> None:
@@ -71,6 +76,54 @@ class AreaIndicatorWindow(QWidget):
         """캡처 영역 좌표에 맞게 창 위치/크기를 조정합니다."""
         self.setGeometry(x, y, w, h)
 
+    # -- 펄스 애니메이션용 커스텀 프로퍼티 ----------------------------------
+    def _get_pulse(self) -> float:
+        return self._pulse_value
+
+    def _set_pulse(self, value: float) -> None:
+        self._pulse_value = value
+        # 펄스 값이 바뀔 때마다 테두리를 다시 그린다
+        self.update()
+
+    # QPropertyAnimation이 이 프로퍼티를 대상으로 동작한다
+    pulse = pyqtProperty(float, fget=_get_pulse, fset=_set_pulse)
+
+    # -- 펄스 애니메이션 제어 ------------------------------------------------
+    def _start_pulse_animation(self) -> None:
+        """번역 중 테두리가 부드럽게 깜빡이는 펄스 애니메이션을 시작합니다."""
+        self._pulse_forward = True
+        anim = QPropertyAnimation(self, b"pulse")
+        anim.setDuration(800)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.3)
+        anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        # 애니메이션 완료 시 방향을 반대로 바꿔서 핑-퐁 루프 구현
+        anim.finished.connect(self._on_pulse_finished)
+        self._pulse_anim = anim
+        anim.start()
+
+    def _on_pulse_finished(self) -> None:
+        """한 방향의 펄스가 끝나면 반대 방향으로 재시작합니다."""
+        if self._pulse_anim is None:
+            return
+        # 방향 전환: 어두워졌으면 밝아지고, 밝아졌으면 어두워진다
+        self._pulse_forward = not self._pulse_forward
+        if self._pulse_forward:
+            self._pulse_anim.setStartValue(0.3)
+            self._pulse_anim.setEndValue(1.0)
+        else:
+            self._pulse_anim.setStartValue(1.0)
+            self._pulse_anim.setEndValue(0.3)
+        self._pulse_anim.start()
+
+    def _stop_pulse_animation(self) -> None:
+        """펄스 애니메이션을 정지하고 불투명도를 원래대로 되돌립니다."""
+        if self._pulse_anim is not None:
+            self._pulse_anim.stop()
+            self._pulse_anim = None
+        self._pulse_value = 1.0
+
+    # -- 상태 설정 -----------------------------------------------------------
     def set_status(self, status: str) -> None:
         """
         테두리 색상을 상태에 따라 변경합니다.
@@ -78,15 +131,31 @@ class AreaIndicatorWindow(QWidget):
         Args:
             status: "idle" | "translating" | "error"
         """
-        if self._status != status:
-            self._status = status
-            self.update()
+        if self._status == status:
+            return
+
+        old_status = self._status
+        self._status = status
+
+        # translating 상태로 전환 → 펄스 시작
+        if status == "translating":
+            self._start_pulse_animation()
+        # translating 상태에서 벗어남 → 펄스 정지
+        elif old_status == "translating":
+            self._stop_pulse_animation()
+
+        self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        color = _STATUS_COLORS.get(self._status, _STATUS_COLORS["idle"])
+        color = QColor(_STATUS_COLORS.get(self._status, _STATUS_COLORS["idle"]))
+
+        # 번역 중일 때 펄스 값에 따라 테두리 알파를 조절한다
+        if self._status == "translating":
+            color.setAlpha(int(color.alpha() * self._pulse_value))
+
         pen = QPen(color, _BORDER_WIDTH)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)

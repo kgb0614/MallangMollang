@@ -43,6 +43,18 @@ class TextRegion:
 
 
 @dataclass
+class LineBox:
+    """줄 단위 텍스트 영역 — 오버레이 덮어쓰기에 사용"""
+    text: str
+    x: int
+    y: int
+    width: int
+    height: int
+    confidence: float    # 평균 신뢰도
+    font_pt: int         # 줄 높이 기반 폰트 크기 추정값
+
+
+@dataclass
 class OcrResult:
     """OCR 처리 결과"""
     text: str                                  # 전체 추출 텍스트
@@ -152,6 +164,181 @@ class OcrEngine:
             confidence=avg_confidence,
             regions=regions,
         )
+
+    def extract_lines(
+        self,
+        image: Image.Image,
+        lang: str = "auto",
+        preprocess: bool = True,
+    ) -> list[LineBox]:
+        """
+        이미지에서 줄 단위 바운딩 박스를 추출합니다.
+        오버레이가 원문 위에 번역문을 덮어 쓸 때 사용합니다.
+
+        Args:
+            image: 캡처된 PIL 이미지
+            lang: Tesseract 언어 코드. "auto"면 OSD 자동 감지.
+            preprocess: 전처리 적용 여부
+
+        Returns:
+            줄 단위 LineBox 리스트
+        """
+        # --- 언어 자동 감지 (extract_text와 동일 로직) ---
+        if lang == "auto":
+            self._osd_cycle_count += 1
+            if self._cached_lang is None or self._osd_cycle_count >= _OSD_REDETECT_INTERVAL:
+                self._cached_lang = self.detect_script(image)
+                self._osd_cycle_count = 0
+            lang = self._cached_lang
+
+        # --- 전처리 ---
+        if preprocess:
+            processed = self._preprocess(image)
+        else:
+            img = np.array(image)
+            processed = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if len(img.shape) == 3 else img
+
+        # --- Tesseract 데이터 추출 ---
+        data = pytesseract.image_to_data(
+            processed,
+            lang=lang,
+            output_type=pytesseract.Output.DICT,
+        )
+
+        n = len(data["text"])
+
+        # --- 줄(level==4) 인덱스 수집 ---
+        # Tesseract level: 1=page, 2=block, 3=paragraph, 4=line, 5=word
+        line_indices: list[int] = []
+        for i in range(n):
+            if data["level"][i] == 4:
+                line_indices.append(i)
+
+        lines: list[LineBox] = []
+
+        for li, line_idx in enumerate(line_indices):
+            line_block = data["block_num"][line_idx]
+            line_par = data["par_num"][line_idx]
+            line_num = data["line_num"][line_idx]
+
+            # 이 줄에 속하는 단어(level==5) 범위 결정
+            # 다음 줄 인덱스까지 또는 데이터 끝까지 탐색
+            end = line_indices[li + 1] if li + 1 < len(line_indices) else n
+
+            words: list[str] = []
+            confs: list[float] = []
+
+            for wi in range(line_idx + 1, end):
+                if data["level"][wi] != 5:
+                    continue
+                # 같은 블록/문단/줄에 속하는 단어만 수집
+                if (data["block_num"][wi] != line_block
+                        or data["par_num"][wi] != line_par
+                        or data["line_num"][wi] != line_num):
+                    continue
+
+                word = data["text"][wi].strip()
+                conf = float(data["conf"][wi])
+
+                if word and conf >= 0:
+                    words.append(word)
+                    confs.append(conf)
+
+            # 유효한 단어가 없는 줄은 건너뜀
+            if not words:
+                continue
+
+            # 줄 바운딩 박스 정보 (level==4 행에서 가져옴)
+            lx = int(data["left"][line_idx])
+            ly = int(data["top"][line_idx])
+            lw = int(data["width"][line_idx])
+            lh = int(data["height"][line_idx])
+
+            avg_conf = sum(confs) / len(confs)
+
+            # 폰트 크기 추정: 줄 높이(px) → pt 변환 (96 DPI 기준, 행간 1.2 가정)
+            font_pt = round(lh * 72 / 96 / 1.2)
+            font_pt = max(font_pt, 1)  # 최소 1pt
+
+            lines.append(LineBox(
+                text=" ".join(words),
+                x=lx,
+                y=ly,
+                width=lw,
+                height=lh,
+                confidence=avg_conf,
+                font_pt=font_pt,
+            ))
+
+        # --- 인접/겹치는 줄 병합 ---
+        return self._merge_overlapping_lines(lines)
+
+    def _merge_overlapping_lines(self, lines: list[LineBox]) -> list[LineBox]:
+        """
+        수직으로 겹치고 수평으로 가까운 줄들을 하나로 병합합니다.
+
+        병합 조건:
+          - 수직 겹침이 더 짧은 줄 높이의 50% 초과
+          - 수평 간격이 20px 미만
+
+        Args:
+            lines: 정렬되지 않은 LineBox 리스트
+
+        Returns:
+            병합된 LineBox 리스트
+        """
+        if not lines:
+            return []
+
+        # y 좌표 기준 정렬
+        sorted_lines = sorted(lines, key=lambda lb: lb.y)
+
+        merged: list[LineBox] = [sorted_lines[0]]
+
+        for current in sorted_lines[1:]:
+            last = merged[-1]
+
+            # 수직 겹침 계산
+            overlap_top = max(last.y, current.y)
+            overlap_bot = min(last.y + last.height, current.y + current.height)
+            vertical_overlap = max(0, overlap_bot - overlap_top)
+
+            shorter_height = min(last.height, current.height)
+
+            # 수평 간격 계산
+            last_right = last.x + last.width
+            current_right = current.x + current.width
+            horizontal_gap = max(0, max(last.x, current.x) - min(last_right, current_right))
+
+            # 병합 조건: 수직 겹침 > 50% AND 수평 간격 < 20px
+            if shorter_height > 0 and vertical_overlap > shorter_height * 0.5 and horizontal_gap < 20:
+                # 병합: 두 줄을 모두 포함하는 바운딩 박스
+                new_x = min(last.x, current.x)
+                new_y = min(last.y, current.y)
+                new_right = max(last_right, current_right)
+                new_bot = max(last.y + last.height, current.y + current.height)
+                new_w = new_right - new_x
+                new_h = new_bot - new_y
+
+                # 신뢰도: 두 줄의 평균
+                new_conf = (last.confidence + current.confidence) / 2.0
+
+                # 폰트 크기: 병합 후 높이 기준으로 재계산
+                new_font_pt = max(1, round(new_h * 72 / 96 / 1.2))
+
+                merged[-1] = LineBox(
+                    text=last.text + " " + current.text,
+                    x=new_x,
+                    y=new_y,
+                    width=new_w,
+                    height=new_h,
+                    confidence=new_conf,
+                    font_pt=new_font_pt,
+                )
+            else:
+                merged.append(current)
+
+        return merged
 
     def _preprocess(self, image: Image.Image) -> np.ndarray:
         """
