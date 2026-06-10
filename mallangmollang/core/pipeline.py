@@ -30,7 +30,8 @@ class PipelineResult:
 
 # 파이프라인 이벤트 콜백 타입
 OnResultCallback = Callable[[PipelineResult], None]
-OnStatusCallback = Callable[[str], None]   # "idle" | "translating" | "error"
+OnStatusCallback = Callable[[str], None]    # "idle" | "translating" | "error"
+OnErrorCallback = Callable[[str], None]     # 에러 상세 메시지
 
 
 class Pipeline:
@@ -65,6 +66,7 @@ class Pipeline:
         self._running = False
         self._on_result: OnResultCallback | None = None
         self._on_status: OnStatusCallback | None = None
+        self._on_error: OnErrorCallback | None = None
 
     @classmethod
     def from_config(cls, config: Config) -> "Pipeline":
@@ -99,6 +101,10 @@ class Pipeline:
     def on_status(self, callback: OnStatusCallback):
         """파이프라인 상태 변화를 받을 콜백을 등록합니다 (AreaIndicator 연결용)."""
         self._on_status = callback
+
+    def on_error(self, callback: OnErrorCallback):
+        """에러 상세 메시지를 받을 콜백을 등록합니다."""
+        self._on_error = callback
 
     async def run_once(self, region: tuple[int, int, int, int] | None = None) -> PipelineResult:
         """
@@ -214,6 +220,8 @@ class Pipeline:
                     self._on_status("idle")
             except Exception as e:
                 print(f"[Pipeline] 사이클 에러: {e}")
+                if self._on_error:
+                    self._on_error(str(e))
                 if self._on_status:
                     self._on_status("error")
             await asyncio.sleep(interval_ms / 1000.0)

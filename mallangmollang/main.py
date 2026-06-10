@@ -30,6 +30,7 @@ class _Bridge(QObject):
     """
     translation_ready = pyqtSignal(str, object)   # (번역 텍스트, 캡처 영역)
     status_changed = pyqtSignal(str)               # "idle" | "translating" | "error"
+    error_detail = pyqtSignal(str)                 # 에러 상세 메시지
 
 
 class App:
@@ -58,6 +59,7 @@ class App:
         self._bridge = _Bridge()
         self._bridge.translation_ready.connect(self._on_translation_ready)
         self._bridge.status_changed.connect(self._on_status_changed)
+        self._bridge.error_detail.connect(self._on_error_detail)
 
         # 번역 루프 실행을 위한 asyncio 이벤트 루프 (별도 스레드)
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -123,6 +125,7 @@ class App:
 
         pipeline.on_result(on_result)
         pipeline.on_status(lambda status: self._bridge.status_changed.emit(status))
+        pipeline.on_error(lambda msg: self._bridge.error_detail.emit(msg))
         return pipeline
 
     def _on_translation_ready(self, text: str, region):
@@ -133,12 +136,14 @@ class App:
         """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""
         self.indicator.set_status(status)
         if status == "translating":
-            # 변경 감지됨 → 이전 번역을 즉시 숨겨서 스크롤 후 오래된 번역이
-            # 새 화면 위에 남아있는 문제를 방지
             self.overlay.hide_translation()
         elif status == "error":
             self.panel.set_status("● 오류 발생", "rgba(220,50,50,220)")
-            self.toast.show("번역 중 오류가 발생했습니다.", "error")
+
+    def _on_error_detail(self, message: str):
+        """에러 상세 메시지를 토스트로 표시합니다."""
+        short = message if len(message) <= 120 else message[:120] + "…"
+        self.toast.show(f"오류: {short}", "error", 5000)
 
     def _start_translation(self):
         """별도 스레드에서 asyncio 번역 루프를 시작합니다."""
@@ -187,6 +192,7 @@ class App:
             )
         except Exception as e:
             print(f"[App] 번역 루프 오류: {e}")
+            self._bridge.error_detail.emit(str(e))
         finally:
             self._running = False
 
@@ -247,6 +253,7 @@ class App:
                 self._bridge.status_changed.emit("idle")
             except Exception as e:
                 print(f"[App] 스냅샷 오류: {e}")
+                self._bridge.error_detail.emit(str(e))
                 self._bridge.status_changed.emit("error")
             finally:
                 self._snapshot_running = False
