@@ -20,13 +20,19 @@ _STATUS_COLORS: dict[str, QColor] = {
 }
 
 
+# 환경변수 MALLANG_DEBUG=1 로 실행하면 캡처 제외를 건너뛰어
+# 스크린샷 도구로 오버레이를 찍을 수 있습니다 (디버그 전용)
+import os
+_DEBUG_CAPTURE = os.environ.get("MALLANG_DEBUG", "0") == "1"
+
+
 def _exclude_from_screen_capture(win_id: int) -> None:
-    """Windows에서 이 창이 캡처 도구에 잡히지 않도록 설정합니다."""
-    if sys.platform != "win32":
+    """Windows에서 이 창이 mss 캡처에 잡히지 않도록 설정합니다.
+    MALLANG_DEBUG=1 환경변수를 설정하면 이 동작을 건너뜁니다."""
+    if _DEBUG_CAPTURE or sys.platform != "win32":
         return
     try:
         import ctypes
-        # WDA_EXCLUDEFROMCAPTURE: Windows 10 2004(빌드 19041)+ 에서 지원
         WDA_EXCLUDEFROMCAPTURE = 0x00000011
         ctypes.windll.user32.SetWindowDisplayAffinity(win_id, WDA_EXCLUDEFROMCAPTURE)
     except Exception:

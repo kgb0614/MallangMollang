@@ -161,16 +161,23 @@ class Translator:
         system_hint = self._build_line_system_hint(params.system_hint)
         prompt = self._build_line_prompt(lines)
 
+        # 줄 수에 비례해 출력 토큰 여유를 줌 (줄당 최대 80토큰 + 기본 여유)
+        max_tokens = max(params.max_tokens, len(lines) * 80 + 256)
+
         result = await self.provider.translate(
             prompt,
             TranslateParams(
                 temperature=params.temperature,
-                max_tokens=params.max_tokens,
+                max_tokens=max_tokens,
                 system_hint=system_hint,
             ),
         )
 
         translated_lines = self._parse_line_response(result.translated, len(lines))
+
+        # 파싱 실패 디버그 로그 (콘솔 확인용)
+        if len(set(translated_lines)) == 1 and len(translated_lines) > 1:
+            print(f"[Translator] 줄 파싱 주의: 모든 줄이 동일 — 원시 응답:\n{result.translated[:300]}")
 
         # 문맥에 원문/번역을 합쳐서 저장
         joined_source = "\n".join(lines)
@@ -295,18 +302,35 @@ class Translator:
 
     def _parse_line_response(self, response: str, expected_count: int) -> list[str]:
         """LLM 응답에서 번호별 번역 결과를 파싱합니다."""
-        # "번호| 번역" 패턴으로 파싱 시도
-        matches = re.findall(r"^\d+\|\s*(.+)$", response, re.MULTILINE)
-        if len(matches) == expected_count:
-            return matches
+        # 마크다운 코드 블록 제거
+        cleaned = re.sub(r"```[^\n]*\n?", "", response).strip()
 
-        # 패턴 실패 시 비어있지 않은 줄로 분할 시도
-        nonempty = [line.strip() for line in response.splitlines() if line.strip()]
-        if len(nonempty) >= expected_count:
+        # "N| 텍스트" / "N. 텍스트" / "N) 텍스트" / "N: 텍스트" 패턴 순서대로 시도
+        for sep_pattern in (
+            r"^\d+\|\s*(.+)$",
+            r"^\d+\.\s*(.+)$",
+            r"^\d+\)\s*(.+)$",
+            r"^\d+:\s*(.+)$",
+        ):
+            matches = re.findall(sep_pattern, cleaned, re.MULTILINE)
+            if matches:
+                results = [m.strip() for m in matches]
+                if len(results) == expected_count:
+                    return results
+                # 개수가 다르더라도 부분 매칭이 있으면 패딩해서 반환
+                while len(results) < expected_count:
+                    results.append("")
+                return results[:expected_count]
+
+        # 구분자 없는 줄 목록으로 시도
+        nonempty = [line.strip() for line in cleaned.splitlines() if line.strip()]
+        if nonempty:
+            while len(nonempty) < expected_count:
+                nonempty.append("")
             return nonempty[:expected_count]
 
-        # 최종 폴백: 전체 응답을 모든 줄에 반복
-        return [response.strip()] * expected_count
+        # 완전 실패: 첫 줄에만 응답 넣고 나머지는 빈 문자열
+        return [cleaned] + [""] * (expected_count - 1)
 
 
 def _parse_response(response: str, fallback_source: str = "") -> tuple[str, str]:
