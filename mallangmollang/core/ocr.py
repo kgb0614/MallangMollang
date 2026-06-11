@@ -288,9 +288,10 @@ class OcrEngine:
                     font_pt=font_pt,
                 ))
 
-        # y 좌표 기준 정렬 후 겹침 병합
+        # y 좌표 기준 정렬 → 겹침 병합 → 인접 줄 병합
         results.sort(key=lambda lb: lb.y)
-        return self._merge_overlapping_lines(results)
+        results = self._merge_overlapping_lines(results)
+        return self._merge_adjacent_lines(results)
 
     def _merge_overlapping_lines(self, lines: list[LineBox]) -> list[LineBox]:
         """
@@ -353,6 +354,49 @@ class OcrEngine:
                     height=new_h,
                     confidence=new_conf,
                     font_pt=new_font_pt,
+                )
+            else:
+                merged.append(current)
+
+        return merged
+
+    def _merge_adjacent_lines(self, lines: list[LineBox]) -> list[LineBox]:
+        """
+        수직으로 인접하고 수평 정렬이 비슷한 줄을 하나로 합칩니다.
+        Tesseract가 같은 문단을 여러 block으로 분리한 경우를 처리합니다.
+
+        병합 조건:
+          - 두 줄 사이 수직 간격이 폰트 크기(px) 이내
+          - 왼쪽 가장자리 차이가 50px 미만
+        """
+        if len(lines) <= 1:
+            return lines
+
+        sorted_lines = sorted(lines, key=lambda lb: lb.y)
+        merged: list[LineBox] = [sorted_lines[0]]
+
+        for current in sorted_lines[1:]:
+            last = merged[-1]
+
+            gap = current.y - (last.y + last.height)
+            # 폰트 크기 기반 간격 임계값 (pt → px 변환)
+            line_px = last.font_pt * 96 / 72
+            x_diff = abs(last.x - current.x)
+
+            if gap < line_px and x_diff < 50:
+                new_x = min(last.x, current.x)
+                new_y = last.y
+                new_right = max(last.x + last.width, current.x + current.width)
+                new_bottom = current.y + current.height
+                avg_conf = (last.confidence + current.confidence) / 2.0
+                # 폰트: 개별 줄 높이 기반 유지 (전체 높이로 재계산하지 않음)
+                merged[-1] = LineBox(
+                    text=last.text + " " + current.text,
+                    x=new_x, y=new_y,
+                    width=new_right - new_x,
+                    height=new_bottom - new_y,
+                    confidence=avg_conf,
+                    font_pt=last.font_pt,
                 )
             else:
                 merged.append(current)
