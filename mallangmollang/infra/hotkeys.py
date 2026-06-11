@@ -36,7 +36,6 @@ class HotkeyManager(QObject):
 
     toggle_requested = pyqtSignal()
     region_requested = pyqtSignal()
-    mode_switch_requested = pyqtSignal()
 
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
@@ -50,12 +49,10 @@ class HotkeyManager(QObject):
 
         toggle_key = self._config.get("hotkeys.toggle_translation", "<ctrl>+<shift>+t")
         region_key = self._config.get("hotkeys.select_region", "<ctrl>+<shift>+r")
-        mode_key = self._config.get("hotkeys.switch_capture_mode", "<ctrl>+<shift>+m")
 
         hotkey_map = {
             toggle_key: self._on_toggle,
             region_key: self._on_region,
-            mode_key: self._on_mode_switch,
         }
 
         try:
@@ -81,6 +78,3 @@ class HotkeyManager(QObject):
 
     def _on_region(self) -> None:
         self.region_requested.emit()
-
-    def _on_mode_switch(self) -> None:
-        self.mode_switch_requested.emit()

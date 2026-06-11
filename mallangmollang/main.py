@@ -79,7 +79,6 @@ class App:
         self.tray.toggle_requested.connect(self._on_toggle)
         self.tray.settings_requested.connect(self._on_settings)
         self.tray.region_requested.connect(self._on_region_select)
-        self.tray.mode_switch_requested.connect(self._on_mode_switch)
         self.tray.panel_requested.connect(self._show_panel)
         self.tray.debug_copy_requested.connect(self._copy_debug_info)
         self.tray.quit_requested.connect(self._on_quit)
@@ -96,7 +95,6 @@ class App:
         # 전역 단축키
         self.hotkeys.toggle_requested.connect(self._on_toggle)
         self.hotkeys.region_requested.connect(self._on_region_select)
-        self.hotkeys.mode_switch_requested.connect(self._on_mode_switch)
 
     def _is_provider_configured(self) -> bool:
         """현재 프로바이더가 최소한의 설정을 갖추고 있는지 확인합니다."""
@@ -122,8 +120,10 @@ class App:
         pipeline = Pipeline.from_config(self.config)
 
         def on_result(result):
-            region_tuple = result.capture.region
+            region = self.config.get("capture.region")
+            region_tuple = tuple(region) if region else None
 
+            # 줄 단위 번역 결과가 있으면 줄 모드로 전달
             if result.line_translations:
                 self._bridge.lines_ready.emit(result.line_translations, region_tuple)
             elif result.translation and result.translation.translated:
@@ -192,15 +192,12 @@ class App:
         if self._running:
             return
 
-        capture_mode = self.config.get("capture.mode", "region")
-
-        # 영역 지정 모드에서만 영역 필수
-        if capture_mode == "region":
-            region = self.config.get("capture.region")
-            if not region:
-                self.toast.show("번역 영역을 먼저 지정해주세요.", "warning")
-                self._on_region_select()
-                return
+        # 영역이 지정되지 않았으면 먼저 영역 선택
+        region = self.config.get("capture.region")
+        if not region:
+            self.toast.show("번역 영역을 먼저 지정해주세요.", "warning")
+            self._on_region_select()
+            return
 
         self.pipeline = self._build_pipeline()
         if self.pipeline is None:
@@ -212,16 +209,13 @@ class App:
         self.tray.set_active(True)
         self.panel.set_active(True)
 
-        # 영역 지정 모드에서만 고정 영역 표시
-        if capture_mode == "region":
-            region = self.config.get("capture.region")
-            rx, ry, rw, rh = region
-            self.indicator.set_region(rx, ry, rw, rh)
-            self.indicator.set_status("idle")
-            self.indicator.show()
+        # 영역 표시 창 갱신
+        rx, ry, rw, rh = region
+        self.indicator.set_region(rx, ry, rw, rh)
+        self.indicator.set_status("idle")
+        self.indicator.show()
 
-        mode_label = "커서 추적" if capture_mode == "cursor" else "영역 지정"
-        self.toast.show(f"번역을 시작합니다. ({mode_label} 모드)", "success")
+        self.toast.show("번역을 시작합니다.", "success")
 
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(
@@ -234,11 +228,7 @@ class App:
         """asyncio 루프를 스레드에서 실행합니다."""
         asyncio.set_event_loop(self._loop)
         try:
-            capture_mode = self.config.get("capture.mode", "region")
-            if capture_mode == "cursor":
-                region = None
-            else:
-                region = tuple(self.config.get("capture.region"))
+            region = tuple(self.config.get("capture.region"))
             self._loop.run_until_complete(
                 self.pipeline.run_loop(region=region)
             )
@@ -288,16 +278,11 @@ class App:
         if self._snapshot_running:
             return
 
-        capture_mode = self.config.get("capture.mode", "region")
-
-        if capture_mode == "region":
-            region = self.config.get("capture.region")
-            if not region:
-                self.toast.show("번역 영역을 먼저 지정해주세요.", "warning")
-                self._on_region_select()
-                return
-        else:
-            region = None
+        region = self.config.get("capture.region")
+        if not region:
+            self.toast.show("번역 영역을 먼저 지정해주세요.", "warning")
+            self._on_region_select()
+            return
 
         # 스냅샷마다 파이프라인 새로 생성 (이전 이벤트 루프 참조 방지)
         self.pipeline = None
@@ -306,10 +291,9 @@ class App:
 
         self._snapshot_running = True
 
-        if capture_mode == "region" and region:
-            rx, ry, rw, rh = region
-            self.indicator.set_region(rx, ry, rw, rh)
-            self.indicator.show()
+        rx, ry, rw, rh = region
+        self.indicator.set_region(rx, ry, rw, rh)
+        self.indicator.show()
 
         self.panel.set_status("● 번역 중...", "rgba(255,210,50,220)")
 
@@ -318,7 +302,7 @@ class App:
             asyncio.set_event_loop(loop)
             try:
                 loop.run_until_complete(
-                    self.pipeline.run_once(region=tuple(region) if region else None)
+                    self.pipeline.run_once(region=tuple(region))
                 )
                 self._bridge.status_changed.emit("idle")
             except Exception as e:
@@ -384,23 +368,6 @@ class App:
         self.hotkeys.reload()
         self._apply_profile()
 
-    def _on_mode_switch(self):
-        """캡처 모드를 영역 지정 ↔ 커서 추적으로 전환합니다."""
-        was_running = self._running
-        if was_running:
-            self._stop_translation()
-
-        current = self.config.get("capture.mode", "region")
-        new_mode = "cursor" if current == "region" else "region"
-        self.config.set("capture.mode", new_mode)
-
-        label = "커서 추적" if new_mode == "cursor" else "영역 지정"
-        self.toast.show(f"캡처 모드: {label}", "info")
-        self.tray.set_capture_mode(new_mode)
-
-        if was_running:
-            self._start_translation()
-
     def _on_region_select(self):
         """영역 선택 UI를 시작합니다. 패널을 숨겨서 간섭을 방지합니다."""
         if self._running:
@@ -465,8 +432,6 @@ class App:
         self.panel.set_mode(mode)
         self.panel.show()
         self.hotkeys.start()
-        # 저장된 캡처 모드를 트레이에 반영
-        self.tray.set_capture_mode(self.config.get("capture.mode", "region"))
 
         # 최초 실행 또는 API 키 미설정이면 설정 창 표시
         first_run = self.config.get("app.first_run", True)

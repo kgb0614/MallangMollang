@@ -135,16 +135,11 @@ class Pipeline:
         Returns:
             PipelineResult
         """
-        # 1. 캡처 (영역 지정 / 커서 추적)
-        capture_mode = self.config.get("capture.mode", "region")
+        # 1. 캡처
+        if region is None:
+            region = tuple(self.config.get("capture.region", [0, 0, 800, 600]))
 
-        if capture_mode == "cursor":
-            radius = self.config.get("capture.cursor_radius", 200)
-            capture_result = self.capture.capture_around_cursor(radius)
-        else:
-            if region is None:
-                region = tuple(self.config.get("capture.region", [0, 0, 800, 600]))
-            capture_result = self.capture.capture_region(region)
+        capture_result = self.capture.capture_region(region)
 
         # 2. 변경 감지 — 변경 없으면 이후 파이프라인 전체 스킵 (PRD F2-1)
         if self.detector:
