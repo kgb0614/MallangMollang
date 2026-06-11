@@ -7,10 +7,33 @@ from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QLabel, QFrame, QPushButton,
+    QLabel, QFrame, QPushButton, QSizePolicy,
 )
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, QSize
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
+
+
+class _WrapLabel(QLabel):
+    """Word-wrap 시 높이를 레이아웃에 올바르게 알려주는 레이블."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        sp = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        sp.setHeightForWidth(True)
+        self.setSizePolicy(sp)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        fm = self.fontMetrics()
+        rect = fm.boundingRect(
+            0, 0, width, 100_000,
+            int(Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextExpandTabs),
+            self.text(),
+        )
+        return rect.height() + 4
 
 
 _MAX_ENTRIES = 50
@@ -174,8 +197,7 @@ class SidePanel(QWidget):
 
         # 원문 (있으면)
         if original.strip():
-            orig_lbl = QLabel(original.strip())
-            orig_lbl.setWordWrap(True)
+            orig_lbl = _WrapLabel(original.strip())
             orig_lbl.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse
             )
@@ -185,8 +207,7 @@ class SidePanel(QWidget):
             layout.addWidget(orig_lbl)
 
         # 번역문
-        trans_lbl = QLabel(translated.strip())
-        trans_lbl.setWordWrap(True)
+        trans_lbl = _WrapLabel(translated.strip())
         trans_lbl.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
