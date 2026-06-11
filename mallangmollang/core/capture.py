@@ -28,15 +28,6 @@ class ScreenCapture:
         result.image.show()
     """
 
-    def __init__(self):
-        self._sct: mss.base.MSSBase | None = None
-
-    def _get_sct(self) -> mss.base.MSSBase:
-        """mss 인스턴스를 지연 생성합니다 (첫 캡처 시점에 초기화)."""
-        if self._sct is None:
-            self._sct = mss.mss()
-        return self._sct
-
     def capture_region(self, region: tuple[int, int, int, int]) -> CaptureResult:
         """
         지정된 영역을 캡처합니다.
@@ -49,13 +40,9 @@ class ScreenCapture:
         """
         x, y, w, h = region
         monitor = {"left": x, "top": y, "width": w, "height": h}
-        try:
-            screenshot = self._get_sct().grab(monitor)
-        except Exception:
-            # mss 핸들이 다른 스레드에서 생성되었거나 만료됨 → 갱신 후 재시도
-            self.close()
-            screenshot = self._get_sct().grab(monitor)
-        image = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+        with mss.mss() as sct:
+            screenshot = sct.grab(monitor)
+            image = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
 
         return CaptureResult(
             image=image,
@@ -77,10 +64,9 @@ class ScreenCapture:
         mouse = Controller()
         cx, cy = mouse.position
 
-        # 모니터 전체 영역을 가져와서 화면 밖으로 벗어나지 않게 클램핑
-        sct = self._get_sct()
-        # monitors[0]은 모든 모니터를 합친 가상 전체 영역
-        full = sct.monitors[0]
+        with mss.mss() as sct:
+            full = sct.monitors[0]
+
         screen_left = full["left"]
         screen_top = full["top"]
         screen_right = screen_left + full["width"]
@@ -106,10 +92,9 @@ class ScreenCapture:
             [{"left": 0, "top": 0, "width": 1920, "height": 1080}, ...]
             인덱스 0은 전체 가상 영역, 1부터 개별 모니터
         """
-        return self._get_sct().monitors
+        with mss.mss() as sct:
+            return sct.monitors
 
     def close(self):
-        """mss 리소스를 해제합니다."""
-        if self._sct is not None:
-            self._sct.close()
-            self._sct = None
+        """하위 호환용 — 더 이상 핸들을 보관하지 않으므로 no-op."""
+        pass
