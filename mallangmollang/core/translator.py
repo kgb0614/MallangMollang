@@ -319,10 +319,10 @@ class Translator:
             stripped = re.sub(r"\n\d+[|.:)]\s*", " ", stripped).strip()
             return [stripped or cleaned]
 
-        # 여러 줄: 번호 구분자로 각 항목 추출
-        # "N| 다음 번호 전까지 전부" 방식으로 다중 줄 번역도 캡처
+        # 번호 구분자 파싱: 완전 매치(expected_count 이상) → 부분 매치 순으로 시도
+        # LLM이 일부 줄만 반환해도 N| 마커를 올바르게 제거해서 추출
+        best_positions: list[tuple[int, int]] = []
         for sep in (r"\|", r"\.", r"\)", r":"):
-            # 각 번호 항목의 시작 위치를 찾아 슬라이싱
             pattern = rf"^\d+{sep}\s*"
             positions = [(m.start(), m.end()) for m in re.finditer(pattern, cleaned, re.MULTILINE)]
             if len(positions) >= expected_count:
@@ -333,6 +333,18 @@ class Translator:
                 while len(results) < expected_count:
                     results.append("")
                 return results
+            if len(positions) > len(best_positions):
+                best_positions = positions
+
+        # 부분 매치: LLM이 일부 줄만 번역한 경우 — N| 마커를 제거하면서 추출
+        if best_positions:
+            results = []
+            for i, (_, content_start) in enumerate(best_positions):
+                end = best_positions[i + 1][0] if i + 1 < len(best_positions) else len(cleaned)
+                results.append(cleaned[content_start:end].strip())
+            while len(results) < expected_count:
+                results.append("")
+            return results
 
         # 구분자 없는 경우: 비어있지 않은 줄로 분할
         nonempty = [line.strip() for line in cleaned.splitlines() if line.strip()]

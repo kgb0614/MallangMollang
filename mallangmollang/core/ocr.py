@@ -31,7 +31,8 @@ _SCRIPT_TO_LANG: dict[str, str] = {
 _AUTO_FALLBACK = "jpn+eng+kor"
 
 # OCR이 불릿/목록 마커를 읽을 때 흔히 나오는 문자들
-_LIST_MARKERS = set("••-*=·▪►▶○●◆◇✓✗☐☑+>»~")
+# © : Tesseract가 • (불릿)을 자주 © 로 오인식함
+_LIST_MARKERS = set("••-*=·▪►▶○●◆◇✓✗☐☑+>»~©")
 
 
 def _starts_with_list_marker(text: str) -> bool:
