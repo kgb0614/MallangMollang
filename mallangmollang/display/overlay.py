@@ -128,97 +128,69 @@ class OverlayWindow(QWidget):
             self._paint_block()
 
     def _paint_lines(self):
-        """각 줄/블록 위치에 불투명 배경 + 번역 텍스트를 그립니다."""
+        """각 줄 위치에 불투명 배경 + 번역 텍스트를 그립니다.
+
+        폰트 자동 축소: 번역 텍스트가 OCR 원본 영역에 맞을 때까지
+        폰트 크기를 1pt씩 줄임. 최소 6pt.
+        """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
         p = self.preset
         bg = QColor(*p.bg_color)
+        bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), max(bg.alpha(), 220))
         text_color = QColor(*p.text_color)
+        text_flags = (Qt.AlignmentFlag.AlignLeft
+                      | Qt.AlignmentFlag.AlignTop
+                      | Qt.TextFlag.TextWordWrap)
 
         for line in self._lines:
             if not line.text.strip():
                 continue
 
-            font_size = max(8, line.font_pt)
-            font = QFont(p.font_family, font_size)
+            pad = 3
+            box_w = line.width
+            box_h = line.height
+            avail_w = max(1, box_w - pad * 2)
+            avail_h = max(1, box_h - pad * 2)
+
+            # OCR 폰트에서 시작, 텍스트가 박스에 맞을 때까지 축소
+            fit_size = max(8, line.font_pt)
+            for size in range(fit_size, 5, -1):
+                test_font = QFont(p.font_family, size)
+                test_font.setBold(p.font_bold)
+                bound = QFontMetrics(test_font).boundingRect(
+                    QRect(0, 0, avail_w, 10000), text_flags, line.text,
+                )
+                if bound.height() <= avail_h:
+                    fit_size = size
+                    break
+                fit_size = size
+
+            font = QFont(p.font_family, fit_size)
             font.setBold(p.font_bold)
             painter.setFont(font)
 
-            metrics = QFontMetrics(font)
-            single_line_width = metrics.horizontalAdvance(line.text)
-            line_height = metrics.height()
+            # 배경: OCR 원본 영역을 정확히 덮음
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(bg_opaque))
+            painter.drawRoundedRect(line.x, line.y, box_w, box_h, 2, 2)
 
-            # OCR 박스 높이가 줄 높이의 1.3배 초과면 다중 줄 블록으로 판단
-            # (번역 텍스트 길이가 아닌 원본 영역 크기 기준)
-            is_multiline = line.height > line_height * 1.3
+            # 텍스트 렌더링
+            draw_rect = QRect(line.x + pad, line.y + pad, avail_w, avail_h)
 
-            if is_multiline:
-                # 문단 블록: word wrap으로 그림
-                pad = 3
-                box_w = line.width
+            if p.outline:
+                outline_color = QColor(*p.outline_color)
+                painter.setPen(QPen(outline_color, 2))
+                for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                    painter.drawText(
+                        draw_rect.adjusted(dx, dy, dx, dy),
+                        text_flags, line.text,
+                    )
 
-                # 번역 텍스트의 실제 높이 계산 (word wrap 적용)
-                measure_rect = QRect(0, 0, box_w - pad * 2, 10000)
-                text_bound = metrics.boundingRect(
-                    measure_rect,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
-                    line.text,
-                )
-                needed_h = text_bound.height() + pad * 2
-                box_h = max(line.height, needed_h)
-
-                # 배경
-                bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), max(bg.alpha(), 220))
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(bg_opaque))
-                painter.drawRoundedRect(line.x, line.y, box_w, box_h, 2, 2)
-
-                # 텍스트 (word wrap)
-                draw_rect = QRect(line.x + pad, line.y + pad,
-                                  box_w - pad * 2, box_h - pad * 2)
-                if p.outline:
-                    outline_color = QColor(*p.outline_color)
-                    painter.setPen(QPen(outline_color, 2))
-                    for dx, dy in [(-1,-1),(-1,1),(1,-1),(1,1)]:
-                        painter.drawText(
-                            draw_rect.adjusted(dx, dy, dx, dy),
-                            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
-                            line.text,
-                        )
-                painter.setPen(QPen(text_color))
-                painter.drawText(
-                    draw_rect,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
-                    line.text,
-                )
-            else:
-                # 단일 줄: 한 줄로 그림
-                box_w = max(line.width, single_line_width + 6)
-                box_h = max(line.height, line_height + 2)
-
-                bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), max(bg.alpha(), 220))
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(bg_opaque))
-                painter.drawRoundedRect(line.x, line.y, box_w, box_h, 2, 2)
-
-                if p.outline:
-                    outline_color = QColor(*p.outline_color)
-                    painter.setPen(QPen(outline_color, 2))
-                    for dx, dy in [(-1,-1),(-1,1),(1,-1),(1,1)]:
-                        painter.drawText(
-                            line.x + 3 + dx,
-                            line.y + metrics.ascent() + 1 + dy,
-                            line.text,
-                        )
-
-                painter.setPen(QPen(text_color))
-                painter.drawText(
-                    line.x + 3,
-                    line.y + metrics.ascent() + 1,
-                    line.text,
-                )
+            painter.setPen(QPen(text_color))
+            painter.drawText(draw_rect, text_flags, line.text)
 
         painter.end()
 
