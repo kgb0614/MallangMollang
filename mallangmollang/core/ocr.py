@@ -30,6 +30,25 @@ _SCRIPT_TO_LANG: dict[str, str] = {
 # OSD 실패 시 폴백: 게임 번역에 가장 흔한 언어들
 _AUTO_FALLBACK = "jpn+eng+kor"
 
+# OCR이 불릿/목록 마커를 읽을 때 흔히 나오는 문자들
+_LIST_MARKERS = set("••-*=·▪►▶○●◆◇✓✗☐☑+>»~")
+
+
+def _starts_with_list_marker(text: str) -> bool:
+    """텍스트가 목록 항목(불릿, 번호 등)으로 시작하는지 확인합니다."""
+    s = text.strip()
+    if not s:
+        return False
+    if s[0] in _LIST_MARKERS:
+        return True
+    # 번호 매기기: "1.", "2)", "3]" 등
+    if re.match(r"^\d+[.)\]]", s):
+        return True
+    # 괄호 시작: "(Optional)" 등
+    if s.startswith("("):
+        return True
+    return False
+
 
 @dataclass
 class TextRegion:
@@ -368,6 +387,7 @@ class OcrEngine:
         병합 조건:
           - 두 줄 사이 수직 간격이 폰트 크기(px) 이내
           - 왼쪽 가장자리 차이가 50px 미만
+          - 다음 줄이 목록 마커로 시작하지 않음
         """
         if len(lines) <= 1:
             return lines
@@ -379,17 +399,15 @@ class OcrEngine:
             last = merged[-1]
 
             gap = current.y - (last.y + last.height)
-            # 폰트 크기 기반 간격 임계값 (pt → px 변환)
             line_px = last.font_pt * 96 / 72
             x_diff = abs(last.x - current.x)
 
-            if gap < line_px and x_diff < 50:
+            if gap < line_px and x_diff < 50 and not _starts_with_list_marker(current.text):
                 new_x = min(last.x, current.x)
                 new_y = last.y
                 new_right = max(last.x + last.width, current.x + current.width)
                 new_bottom = current.y + current.height
                 avg_conf = (last.confidence + current.confidence) / 2.0
-                # 폰트: 개별 줄 높이 기반 유지 (전체 높이로 재계산하지 않음)
                 merged[-1] = LineBox(
                     text=last.text + " " + current.text,
                     x=new_x, y=new_y,
