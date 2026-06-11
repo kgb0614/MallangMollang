@@ -15,6 +15,7 @@ from mallangmollang.infra.hotkeys import HotkeyManager
 from mallangmollang.core.pipeline import Pipeline
 from mallangmollang.display.overlay import OverlayWindow
 from mallangmollang.display.area_indicator import AreaIndicatorWindow
+from mallangmollang.display.panel import SidePanel
 from mallangmollang.display.presets import get_preset_by_name
 from mallangmollang.ui.tray import TrayIcon
 from mallangmollang.ui.settings import SettingsWindow
@@ -50,6 +51,7 @@ class App:
             preset=get_preset_by_name(self.config.get("display.active_preset", "기본"))
         )
         self.indicator = AreaIndicatorWindow()
+        self.side_panel = SidePanel()
         self.panel = ControlPanel()
         self.tray = TrayIcon()
         self.region_selector = RegionSelector()
@@ -137,25 +139,32 @@ class App:
         return pipeline
 
     def _on_translation_ready(self, text: str, region):
-        """블록 모드: 전체 번역 텍스트를 오버레이에 표시합니다."""
-        self.overlay.show_translation(text, region=region)
+        """번역 결과를 표시 모드에 따라 오버레이 또는 사이드 패널에 보냅니다."""
+        if self.config.get("display.mode", "overlay") == "panel":
+            self.side_panel.add_entry(text)
+        else:
+            self.overlay.show_translation(text, region=region)
 
     def _on_lines_ready(self, line_translations, region):
-        """줄 단위 모드: 각 줄 위치에 번역을 덮어씌웁니다."""
-        from mallangmollang.display.overlay import TranslatedLine
-
-        lines = [
-            TranslatedLine(
-                text=lt.translated,
-                x=lt.line_box.x,
-                y=lt.line_box.y,
-                width=lt.line_box.width,
-                height=lt.line_box.height,
-                font_pt=lt.line_box.font_pt,
-            )
-            for lt in line_translations
-        ]
-        self.overlay.show_lines(lines, region=region)
+        """줄 단위 번역 결과를 표시 모드에 따라 분기합니다."""
+        if self.config.get("display.mode", "overlay") == "panel":
+            original = "\n".join(lt.line_box.text for lt in line_translations)
+            translated = "\n".join(lt.translated for lt in line_translations)
+            self.side_panel.add_entry(translated, original)
+        else:
+            from mallangmollang.display.overlay import TranslatedLine
+            lines = [
+                TranslatedLine(
+                    text=lt.translated,
+                    x=lt.line_box.x,
+                    y=lt.line_box.y,
+                    width=lt.line_box.width,
+                    height=lt.line_box.height,
+                    font_pt=lt.line_box.font_pt,
+                )
+                for lt in line_translations
+            ]
+            self.overlay.show_lines(lines, region=region)
 
     def _on_status_changed(self, status: str):
         """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""
@@ -214,6 +223,10 @@ class App:
         self.indicator.set_region(rx, ry, rw, rh)
         self.indicator.set_status("idle")
         self.indicator.show()
+
+        # 패널 모드이면 사이드 패널 표시
+        if self.config.get("display.mode", "overlay") == "panel":
+            self.side_panel.show()
 
         self.toast.show("번역을 시작합니다.", "success")
 
@@ -368,6 +381,15 @@ class App:
         self.hotkeys.reload()
         self._apply_profile()
 
+        # 표시 모드 전환 반영
+        display_mode = self.config.get("display.mode", "overlay")
+        if display_mode == "panel":
+            self.overlay.hide_translation()
+            if self._running:
+                self.side_panel.show()
+        else:
+            self.side_panel.hide()
+
     def _on_region_select(self):
         """영역 선택 UI를 시작합니다. 패널을 숨겨서 간섭을 방지합니다."""
         if self._running:
@@ -399,12 +421,18 @@ class App:
         self.panel.activateWindow()
 
     def _init_panel_position(self):
-        """컨트롤 패널을 화면 우상단에 배치합니다."""
+        """컨트롤 패널과 사이드 패널을 화면 우측에 배치합니다."""
         screen = self.qt_app.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
             self.panel.adjustSize()
             margin = 16
+
+            # 사이드 패널: 우측, 컨트롤 패널 아래
+            self.side_panel.move(
+                geo.right() - self.side_panel.width() - margin,
+                geo.top() + margin + self.panel.height() + 8,
+            )
             self.panel.move(
                 geo.right() - self.panel.width() - margin,
                 geo.top() + margin,
