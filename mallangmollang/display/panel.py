@@ -9,31 +9,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
     QLabel, QFrame, QPushButton, QSizePolicy,
 )
-from PyQt6.QtCore import Qt, QPoint, QSize
+from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
-
-
-class _WrapLabel(QLabel):
-    """Word-wrap 시 높이를 레이아웃에 올바르게 알려주는 레이블."""
-
-    def __init__(self, text: str = "", parent=None):
-        super().__init__(text, parent)
-        self.setWordWrap(True)
-        sp = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        sp.setHeightForWidth(True)
-        self.setSizePolicy(sp)
-
-    def hasHeightForWidth(self) -> bool:
-        return True
-
-    def heightForWidth(self, width: int) -> int:
-        fm = self.fontMetrics()
-        rect = fm.boundingRect(
-            0, 0, width, 100_000,
-            int(Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextExpandTabs),
-            self.text(),
-        )
-        return rect.height() + 4
 
 
 _MAX_ENTRIES = 50
@@ -183,12 +160,15 @@ class SidePanel(QWidget):
             QFrame {
                 background: rgba(35, 35, 48, 200);
                 border-radius: 6px;
-                padding: 2px;
             }
         """)
+        entry.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
+        )
         layout = QVBoxLayout(entry)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(2)
+        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
 
         # 타임스탬프
         ts_lbl = QLabel(ts)
@@ -197,22 +177,30 @@ class SidePanel(QWidget):
 
         # 원문 (있으면)
         if original.strip():
-            orig_lbl = _WrapLabel(original.strip())
+            orig_lbl = QLabel(original.strip())
+            orig_lbl.setWordWrap(True)
             orig_lbl.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse
             )
             orig_lbl.setStyleSheet(
                 "color: rgba(150,150,170,200); font-size: 11px;"
             )
+            orig_lbl.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+            )
             layout.addWidget(orig_lbl)
 
         # 번역문
-        trans_lbl = _WrapLabel(translated.strip())
+        trans_lbl = QLabel(translated.strip())
+        trans_lbl.setWordWrap(True)
         trans_lbl.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         trans_lbl.setStyleSheet(
             "color: rgba(230,230,240,240); font-size: 13px;"
+        )
+        trans_lbl.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
         )
         layout.addWidget(trans_lbl)
 
