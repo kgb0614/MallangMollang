@@ -157,9 +157,20 @@ LLM 프로바이더별 어댑터. 모두 동일한 추상 인터페이스를 구
 - pynput 또는 keyboard 라이브러리로 시스템 전역 단축키 등록
 - 다른 프로그램 위에서도 동작
 
-**Crypto** — API 키 암호화
+**Crypto** — API 키 암호화 (미구현)
 - API 키를 로컬에 암호화하여 저장
 - 평문 노출 방지
+
+### 2.6 Profiles
+
+번역 대상 콘텐츠의 배경 정보를 사전 정의하여 번역 품질을 높이는 모듈.
+
+**Profiles** — 번역 프로필 관리 (`core/profiles.py`)
+- `TranslationProfile` 데이터 구조: 이름, 장르, 분위기, 용어집, 추가 지시
+- `profiles.json`으로 저장/불러오기 (여러 프로필 관리)
+- LLM 자동 생성: 키워드 → Gemini API 호출(번역과 별도) → JSON 응답 파싱 → 프로필 필드 채움
+- 번역 시 선택된 프로필을 `system_hint`에 텍스트 블록으로 주입
+- 프로필 없이도 기존과 동일하게 동작
 
 ---
 
@@ -204,7 +215,7 @@ mallangmollang/
 │   ├── detector.py           # 변경 감지 (이미지 해시)
 │   ├── ocr.py                # OCR 엔진 (extract_text, extract_lines, 문단 병합, 목록 분리)
 │   ├── translator.py         # 번역 엔진 (줄 단위/개별/Vision, 문맥 기억)
-│   ├── profiles.py           # 번역 프로필 관리 (미구현)
+│   ├── profiles.py           # 번역 프로필 관리 (LLM 자동 생성, JSON 저장/불러오기)
 │   ├── cache.py              # 번역 캐시 (LRU)
 │   └── pipeline.py           # 파이프라인 오케스트레이터 (LineTranslation, 진단 로그)
 │

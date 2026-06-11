@@ -146,6 +146,8 @@
 
 7. **번역 프로필 미구현**
    - PRD의 F5-6 (톤/용어집/문맥 사전 정의)
+   - 구현 계획 확정: `core/profiles.py` + 설정 UI 탭 + LLM 자동 생성
+   - 상세 설계는 `docs/ROADMAP.md` Phase 2-1 참조
 
 ---
 
