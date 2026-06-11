@@ -1,7 +1,7 @@
 # 말랑몰랑 (MallangMollang) — System Design Spec
 
-**작성일:** 2026-06-01
-**상태:** 승인됨
+**작성일:** 2026-06-01 (최종 수정: 2026-06-11)
+**상태:** 승인됨 (구현 반영 업데이트)
 **관련 문서:** PRD-MallangMollang.md, UserFlow-MallangMollang.md
 
 ---
@@ -42,14 +42,21 @@
 **OCR Engine** — 텍스트 추출
 - Tesseract를 통해 이미지에서 텍스트를 추출
 - 추출 전 이미지 전처리(이진화, 노이즈 제거, 대비 보정) 수행
+- `extract_text()`: 단어 단위 추출 → 전체 텍스트 결합
+- `extract_lines()`: Tesseract level-4 줄 데이터를 `(block_num, par_num)` 기준으로 문단 병합. 목록 마커(`•`, `-`, `+`, `©` 등)로 시작하는 줄은 병합에서 제외
+- OSD(Orientation and Script Detection)로 언어 자동 감지, 10회마다 재감지
 - 입력: 캡처 이미지 (PIL Image), 인식 대상 언어
-- 출력: OcrResult (추출 텍스트, 신뢰도, 텍스트 영역 좌표)
+- 출력: `OcrResult` (전체 텍스트, 신뢰도) 또는 `list[LineBox]` (줄 단위 위치/크기/폰트)
 - Vision API 모드에서는 이 모듈을 건너뜀
 
 **Translator** — 번역 엔진
 - 경로 A (OCR+LLM): OCR 텍스트 + 문맥을 프롬프트로 구성하여 LLM에 전달
 - 경로 B (Vision): 캡처 이미지 + 문맥을 Vision LLM에 직접 전달
+- `translate_text()`: 단일 텍스트 번역 (`[corrected]/[translated]` 형식)
+- `translate_lines()`: 줄 단위 번역 (`N|` 번호 형식). 300자 이상 줄은 자동으로 `translate_text()`로 개별 번역
+- `translate_vision()`: 이미지 직접 번역
 - 이전 3~5회 번역 결과를 내부 큐(deque)로 관리하여 문맥 기억
+- max_tokens를 입력 텍스트 길이에 비례해 동적 계산
 - 입력: 텍스트 또는 이미지, 이전 문맥, 번역 설정
 - 출력: TranslationResult (번역 텍스트, 교정된 원문, 사용 토큰 수)
 
@@ -63,6 +70,9 @@
 - 캡처 → 감지 → (OCR →) 캐시 → 번역 → 표시
 - 번역 경로 (OCR+LLM / Vision) 분기 처리
 - 비동기 실행으로 UI 스레드 블로킹 방지
+- `LineTranslation` 리스트 생성: 각 OCR 줄에 번역 텍스트 매핑
+- 줄 매핑 품질 검사: 50% 이상 빈 줄이면 블록 모드로 폴백
+- 진단 로그를 `translation_log.txt` 파일에 자동 저장
 
 ### 2.2 Providers
 
@@ -89,10 +99,17 @@ LLM 프로바이더별 어댑터. 모두 동일한 추상 인터페이스를 구
 **Overlay** — 오버레이 창
 - PyQt6 투명 윈도우 (FramelessWindowHint + WA_TranslucentBackground)
 - 항상 최상위 (WindowStaysOnTopHint)
-- 마우스 클릭 투과 (WA_TransparentForMouseInput)
-- 스타일 프리셋에 따라 폰트, 색상, 배경 투명도 적용
+- 마우스 클릭 투과 (WA_TransparentForMouseEvents)
+- `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` — mss 캡처에서 자동 제외 (피드백 루프 방지)
+- 두 가지 표시 모드:
+  - **line 모드**: 각 OCR 줄 위치에 불투명 배경 + 번역 텍스트 덮어씌우기 (MORT 스타일). 폰트 자동 축소(최소 8pt) + 박스 높이 자동 확장
+  - **block 모드**: 캡처 영역 전체에 반투명 배경 + 번역 텍스트 (폴백)
 
-**Panel** — 사이드 패널
+**AreaIndicator** — 캡처 영역 표시
+- 캡처 영역 테두리를 실선으로 표시
+- 번역 중 펄스 애니메이션 (투명도 1.0↔0.3, 800ms 주기)
+
+**Panel** — 사이드 패널 (미구현)
 - 화면 한쪽에 고정되는 독립 창
 - 위치(좌/우/상/하)와 크기 조절 가능
 - 번역 히스토리를 스크롤 형태로 표시
@@ -107,14 +124,18 @@ LLM 프로바이더별 어댑터. 모두 동일한 추상 인터페이스를 구
 사용자 인터페이스 컴포넌트.
 
 **Tray** — 시스템 트레이 아이콘
-- 우클릭 메뉴: 설정, 번역 시작/중지, 모드 전환, 종료
+- 우클릭 메뉴: 설정, 번역 시작/중지, 모드 전환, 진단 정보 복사, 종료
 - 상태 표시: 아이콘 색상으로 번역 활성/비활성 구분
 
 **Settings** — 설정 창
 - 탭 구조: 프로바이더, 언어, 캡처, 표시, 단축키, 번역
 - 각 탭이 Config 모듈을 통해 설정을 읽고 저장
 
-**Onboarding** — 온보딩 화면
+**Toast** — 알림 토스트
+- 에러 상세 메시지를 화면에 일시적으로 표시
+- 레벨별 색상 구분 (error, info)
+
+**Onboarding** — 온보딩 화면 (미구현)
 - 최초 실행 시 표시
 - 3단계: 소개 → 프로바이더 설정 → 언어 설정
 
@@ -144,13 +165,16 @@ LLM 프로바이더별 어댑터. 모두 동일한 추상 인터페이스를 구
 
 ## 3. 데이터 흐름
 
-### 3.1 기본 흐름 (OCR + LLM)
+### 3.1 기본 흐름 (OCR + LLM, 줄 단위)
 
 ```
-Capture → Detector → OCR → Cache → Translator → Display
-            │ (변경없음)        │ (히트)
-            └→ SKIP             └→ 캐시 번역 표시
+Capture → Detector → OCR(extract_lines) → Cache → Translator(translate_lines) → Display(line모드)
+            │ (변경없음)                     │ (히트)        │
+            └→ SKIP                          └→ 캐시 표시    ├─ 짧은 줄: N| 번호 형식 일괄 번역
+                                                              └─ 긴 줄(300자+): translate_text 개별 번역
 ```
+
+줄 매핑 품질 검사: 번역 결과의 50% 이상이 빈 줄이면 block 모드로 폴백.
 
 ### 3.2 Vision API 흐름
 
@@ -176,40 +200,45 @@ Vision 모드에서는 OCR 단계를 건너뛰고, Translator가 캡처 이미�
 ```
 mallangmollang/
 ├── core/                     # 핵심 파이프라인
-│   ├── capture.py            # 화면 캡처 (영역/커서)
+│   ├── capture.py            # 화면 캡처 (영역/커서), mss 사용
 │   ├── detector.py           # 변경 감지 (이미지 해시)
-│   ├── ocr.py                # OCR 엔진 래퍼
-│   ├── translator.py         # 번역 엔진 (프롬프트, 문맥)
-│   ├── profiles.py           # 번역 프로필 관리 (톤, 용어, 문맥)
+│   ├── ocr.py                # OCR 엔진 (extract_text, extract_lines, 문단 병합, 목록 분리)
+│   ├── translator.py         # 번역 엔진 (줄 단위/개별/Vision, 문맥 기억)
+│   ├── profiles.py           # 번역 프로필 관리 (미구현)
 │   ├── cache.py              # 번역 캐시 (LRU)
-│   └── pipeline.py           # 파이프라인 오케스트레이터
+│   └── pipeline.py           # 파이프라인 오케스트레이터 (LineTranslation, 진단 로그)
 │
 ├── providers/                # LLM 프로바이더 어댑터
-│   ├── base.py               # 추상 인터페이스
-│   ├── openai.py
-│   ├── gemini.py
-│   ├── claude.py
-│   └── ollama.py
+│   ├── base.py               # 추상 인터페이스 (BaseProvider)
+│   ├── openai.py             # (미구현)
+│   ├── gemini.py             # ✅ AI Studio + Vertex AI
+│   ├── claude.py             # (미구현)
+│   └── ollama.py             # (미구현)
 │
 ├── display/                  # 번역 결과 표시
-│   ├── overlay.py            # 오버레이 창
-│   ├── panel.py              # 사이드 패널 창
+│   ├── overlay.py            # 오버레이 (line/block 모드, 폰트 자동 축소)
+│   ├── area_indicator.py     # 캡처 영역 테두리 + 펄스 애니메이션
+│   ├── panel.py              # 사이드 패널 (미구현)
 │   └── presets.py            # 스타일 프리셋 관리
 │
 ├── ui/                       # 사용자 인터페이스
-│   ├── tray.py               # 시스템 트레이
-│   ├── settings.py           # 설정 창
-│   ├── onboarding.py         # 온보딩 화면
+│   ├── tray.py               # 시스템 트레이 (진단 복사 포함)
+│   ├── settings.py           # 설정 창 (단축키 탭 포함)
+│   ├── toast.py              # 에러/상태 토스트 알림
+│   ├── onboarding.py         # 온보딩 화면 (미구현)
 │   └── region_selector.py    # 영역 선택 드래그 UI
 │
 ├── infra/                    # 기반 유틸리티
-│   ├── config.py             # 설정 저장/로드
-│   ├── hotkeys.py            # 글로벌 단축키
-│   └── crypto.py             # API 키 암호화
+│   ├── config.py             # 설정 저장/로드 (JSON)
+│   ├── hotkeys.py            # 글로벌 단축키 (pynput, 재로드 지원)
+│   └── crypto.py             # API 키 암호화 (미구현)
 │
 ├── config.json               # 사용자 설정 (자동 생성)
-├── main.py                   # 진입점
+├── main.py                   # 진입점 (--debug 플래그)
 └── requirements.txt          # 의존성
+
+tools/                        # 개발/진단 도구 (패키지 외부)
+└── ocr_inspect.py            # OCR 바운딩 박스 시각화
 ```
 
 ---

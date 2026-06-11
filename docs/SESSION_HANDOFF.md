@@ -1,101 +1,151 @@
 # 말랑몰랑 — 세션 핸드오프 문서
 
-> 작성일: 2026-06-11  
+> 최종 업데이트: 2026-06-11  
 > 현재 브랜치: claude/gracious-rubin-w5nsyw
 
 ---
 
 ## 현재 구현 상태
 
+### Core Pipeline
+
+| 모듈 | 상태 | 비고 |
+|------|------|------|
+| `core/capture.py` | ✅ 완료 | 매 캡처마다 `with mss.mss()` 사용 (스레드 안전) |
+| `core/detector.py` | ✅ 완료 | 이미지 해시 기반 변경 감지 |
+| `core/cache.py` | ✅ 완료 | LRU 텍스트 캐시 |
+| `core/ocr.py` | ✅ 완료 | `extract_lines()` 문단 병합 + 목록 마커 분리 |
+| `core/translator.py` | ✅ 완료 | 줄 단위 번역, 긴 문단(300자+) 개별 번역 분리 |
+| `core/pipeline.py` | ✅ 완료 | `LineTranslation` 줄 단위 흐름 + 진단 로그 파일 저장 |
+
+### Providers
+
+| 모듈 | 상태 | 비고 |
+|------|------|------|
+| `providers/base.py` | ✅ 완료 | `BaseProvider` 추상 인터페이스 |
+| `providers/gemini.py` | ✅ 완료 | AI Studio + Vertex AI, `finishReason` 로깅 |
+| `providers/openai.py` | ❌ 미구현 | 설정 UI만 있음, 호출 시 에러 |
+| `providers/claude.py` | ❌ 미구현 | 동일 |
+| `providers/ollama.py` | ❌ 미구현 | 동일 |
+
+### Display
+
+| 모듈 | 상태 | 비고 |
+|------|------|------|
+| `display/overlay.py` | ✅ 완료 | line/block 모드, 폰트 자동 축소(최소 8pt) + 박스 확장 |
+| `display/area_indicator.py` | ✅ 완료 | 펄스 애니메이션, `SetWindowDisplayAffinity` 캡처 제외 |
+| `display/presets.py` | ✅ 완료 | 기본 프리셋 3종 |
+
+### UI
+
+| 모듈 | 상태 | 비고 |
+|------|------|------|
+| `ui/tray.py` | ✅ 완료 | 진단 정보 복사 메뉴 포함 |
+| `ui/settings.py` | ✅ 완료 | 단축키 탭 포함 |
+| `ui/region_selector.py` | ✅ 완료 | |
+| `ui/toast.py` | ✅ 완료 | 에러 상세 메시지 표시 |
+| `ui/onboarding.py` | ❌ 미구현 | |
+
+### Infrastructure
+
 | 모듈 | 상태 | 비고 |
 |------|------|------|
 | `infra/config.py` | ✅ 완료 | |
-| `providers/gemini.py` | ✅ 완료 | Vertex AI + AI Studio 양쪽 지원 |
-| `providers/openai.py` | ❌ 미구현 | 설정에 UI만 있음, 호출 시 에러 |
-| `providers/claude.py` | ❌ 미구현 | 동일 |
-| `providers/ollama.py` | ❌ 미구현 | 동일 |
-| `core/capture.py` | ✅ 완료 | |
-| `core/detector.py` | ✅ 완료 | 이미지 해시 기반 변경 감지 |
-| `core/cache.py` | ✅ 완료 | LRU 텍스트 캐시 |
-| `core/ocr.py` | ✅ 완료 | `extract_lines()` 문단 병합 포함 |
-| `core/translator.py` | ✅ 완료 | 줄 단위 번역, 긴 문단 처리 포함 |
-| `core/pipeline.py` | ✅ 완료 | `LineTranslation` 기반 줄 단위 흐름 |
-| `display/overlay.py` | ✅ 완료 | line/block 두 가지 모드 |
-| `display/area_indicator.py` | ✅ 완료 | 펄스 애니메이션 포함 |
-| `ui/tray.py` | ✅ 완료 | |
-| `ui/settings.py` | ✅ 완료 | 단축키 탭 추가됨 |
-| `ui/region_selector.py` | ✅ 완료 | |
-| `ui/toast.py` | ✅ 완료 | 에러 상세 메시지 표시 |
 | `infra/hotkeys.py` | ✅ 완료 | 글로벌 단축키, 재로드 지원 |
-| `main.py` | ✅ 완료 | `--debug` 플래그, 에러 토스트 |
+| `infra/crypto.py` | ❌ 미구현 | API 키 평문 저장 중 |
+
+### 기타
+
+| 모듈 | 상태 | 비고 |
+|------|------|------|
+| `main.py` | ✅ 완료 | `--debug` 플래그, 스냅샷 모드, 에러 토스트 |
 | `tools/ocr_inspect.py` | ✅ 완료 | OCR 바운딩 박스 시각화 진단 도구 |
 
 ---
 
-## 이번 세션에서 한 것
+## 구현 완료된 PRD 기능 매핑
 
-### 1. AreaIndicator 펄스 애니메이션
-- 번역 중일 때 영역 테두리가 투명도 1.0↔0.3으로 800ms 주기로 깜빡임
-- `QPropertyAnimation` + `pyqtProperty(float)` 구현
-- `set_status("translating")` 호출 시 시작, 다른 상태에서 멈춤
-
-### 2. 단축키 설정 UI
-- `settings.py`에 "단축키" 탭 추가
-- 저장 시 `main.py`에서 `hotkeys.reload()` 호출
-
-### 3. 오류 토스트
-- `_Bridge.error_detail` 시그널로 에러 상세 메시지 전달
-- `toast.show(message[:200], level="error", duration_ms=5000)` 표시
-
-### 4. OCR 진단 도구 (`tools/ocr_inspect.py`)
-- 캡처 이미지에 OCR 바운딩 박스를 색상으로 그려서 PNG 저장
-- CLI: `python tools/ocr_inspect.py --image FILE --lang jpn`
-
-### 5. 오버레이 전면 개편 (MORT 스타일)
-- `display/overlay.py` 완전 재작성
-- `TranslatedLine` dataclass: 위치 + 번역 텍스트 + 폰트 크기
-- `show_lines()`: 각 OCR 박스 위치에 불투명 배경 + 번역 텍스트 덮어씌우기
-- `is_multiline = line.height > line_height * 1.3` 기준으로 문단/단일 줄 구분
-- 문단: word wrap으로 전체 OCR 박스 채움
-- 단일: 한 줄 텍스트로 baseline에 렌더링
-
-### 6. 줄 단위 OCR + 번역 파이프라인
-- `ocr.py`: `extract_lines()` — Tesseract level-4 데이터를 `(block_num, par_num)` 기준으로 문단 병합
-- `translator.py`: `translate_lines()` — "1| 텍스트" 형식으로 LLM 호출
-- `_parse_line_response()`: 구분자 패턴 4종 시도, `expected_count==1`이면 전체 응답 보존
-- `pipeline.py`: `LineTranslation` 리스트 생성, 50% 빈 줄이면 블록 모드 폴백
-
-### 7. `--debug` 플래그
-- `python -m mallangmollang.main --debug` 실행 시 `SetWindowDisplayAffinity` 생략
-- 오버레이/영역표시 창을 스크린샷으로 캡처 가능
+| PRD 항목 | 상태 | 구현 위치 |
+|----------|------|-----------|
+| F1-1 영역 지정 캡처 | ✅ | `core/capture.py`, `ui/region_selector.py` |
+| F1-2 커서 추적 캡처 | ⚠️ 부분 | `capture.capture_around_cursor()` 존재, UI 미연결 |
+| F2-1 이미지 해시 비교 | ✅ | `core/detector.py` |
+| F3-1 Tesseract 연동 | ✅ | `core/ocr.py` |
+| F3-2 다국어 인식 | ✅ | OSD 자동 감지 + 수동 설정 |
+| F3-3 이미지 전처리 | ✅ | 그레이스케일 → 노이즈 제거 → CLAHE → Otsu 이진화 |
+| F4-1 텍스트 해시 캐시 | ✅ | `core/cache.py` |
+| F5-1 OCR 오류 교정 | ✅ | `translator.py` 프롬프트 설계 |
+| F5-2 문맥 기억 | ✅ | `deque(maxlen=context_count)` |
+| F5-3 번역 방향 설정 | ✅ | `language.source` / `language.target` 설정 |
+| F5-5 Vision API 모드 | ✅ | `translator.translate_vision()` |
+| F6-1 Gemini BYOK | ✅ | `providers/gemini.py` |
+| F7-1 오버레이 모드 | ✅ | `display/overlay.py` (line + block) |
+| F8-1 글로벌 단축키 | ✅ | `infra/hotkeys.py` |
+| F8-2 설정 UI | ✅ | `ui/settings.py` |
+| F8-3 설정 저장 | ✅ | `infra/config.py` (JSON) |
 
 ---
 
-## 알려진 문제 (미해결)
+## 최근 세션 작업 이력 (2026-06-11)
 
-### 🔴 치명적
+### 진단 도구
 
-1. **긴 대화문 번역 일부만 나오는 현상**
-   - 증상: 3줄짜리 대화창인데 1번째 줄만 번역되고 나머지는 원문
-   - 원인: OCR이 문단 전체를 1개 LineBox로 묶어서 보내는데, LLM이 "1| ..." 형식으로 응답하면 파싱은 되지만 실제 번역 텍스트가 OCR 박스 높이보다 짧아서 잘려 보임
-   - 관련 파일: `display/overlay.py:_paint_lines()` — `is_multiline` 판단 + word wrap 영역
-   - **현재 상태**: 코드 수정은 완료 (b5ca888 커밋), 실제 테스트 결과 확인 필요
+1. **번역 로그 파일** — OCR 입력 + 번역 출력을 `translation_log.txt`에 자동 저장
+2. **진단 정보 클립보드 복사** — 트레이 메뉴 "진단 정보 복사"로 마지막 번역 정보 복사
+3. **Gemini finishReason 로깅** — 토큰 한도 도달 등 모델 응답 상태를 콘솔에 출력
 
-2. **OpenAI/Claude/Ollama 프로바이더 미구현**
-   - 설정에서 선택하면 "아직 구현 중" 에러 발생
+### OCR 개선
 
-### 🟡 중요
+4. **인접 줄 자동 병합** — 같은 문단의 줄이 Tesseract에서 분리된 경우 자동 합침
+5. **목록 마커 분리** — `•`, `-`, `+`, `©`(불릿 오인식) 등으로 시작하는 줄은 병합에서 제외
+6. **`_split_on_list_markers()`** — Tesseract 문단 그룹 내에서도 불릿 항목 개별 분리
 
-3. **오버레이 검은 여백**
-   - 번역이 짧으면 OCR 박스 아래쪽이 검은색 배경으로 채워짐
-   - 해결책: 번역 텍스트 실제 높이에 맞게 배경 크기 조정
+### 번역 엔진 개선
 
-4. **OCR 신뢰도 필터링 없음**
-   - 화면 일부 아무 글자나 잡아서 번역 시도함
+7. **긴 문단 개별 번역** — 300자 이상 줄은 `translate_text()`로 개별 번역 (번호 형식 회피)
+8. **max_tokens 동적 계산** — 입력 길이에 비례해 토큰 한도 자동 조정 (`char_count * 8 + 512`)
+9. **`_parse_line_response` 부분 매치** — LLM이 일부 줄만 반환해도 N| 마커 제거
+10. **프롬프트 강화** — "긴 줄은 끝까지 완전 번역, 절대 요약 금지" 지시 추가
+
+### 오버레이 개선
+
+11. **폰트 자동 축소** — OCR 박스에 맞을 때까지 1pt씩 축소 (최소 8pt)
+12. **박스 높이 자동 확장** — 최소 폰트에서도 안 맞으면 배경 박스를 텍스트에 맞게 늘림
+
+### 인프라 수정
+
+13. **mss 스레드 안전** — 매 캡처마다 `with mss.mss()` 사용 (핸들 재사용 제거)
+14. **asyncio 이벤트 루프** — 스냅샷마다 pipeline 재생성으로 Event loop closed 해결
+
+---
+
+## 알려진 문제
+
+### 🔴 해결 필요
+
+1. **OpenAI/Claude/Ollama 프로바이더 미구현**
+   - 설정에서 선택하면 에러 발생
+
+2. **OCR 신뢰도 필터링 없음**
+   - 화면 일부 의미 없는 글자를 잡아서 번역 시도
    - 해결책: `LineBox.confidence < 30.0`이면 스킵
 
-5. **캡처 영역 고정 좌표**
-   - 창을 이동하거나 스크롤하면 엉뚱한 곳을 번역
+3. **API 키 평문 저장**
+   - `infra/crypto.py` 미구현
+
+### 🟡 개선 사항
+
+4. **커서 추적 모드 UI 미연결**
+   - `capture.capture_around_cursor()` 구현됨, 트레이/단축키에서 활성화 불가
+
+5. **온보딩 화면 미구현**
+   - 최초 실행 시 API 키 입력 가이드 없음
+
+6. **사이드 패널 모드 미구현**
+   - `display/panel.py` 존재하지만 빈 파일 또는 미연결
+
+7. **번역 프로필 미구현**
+   - PRD의 F5-6 (톤/용어집/문맥 사전 정의)
 
 ---
 
@@ -105,7 +155,7 @@
 # 일반 실행
 python -m mallangmollang.main
 
-# 디버그 모드 (스크린샷에 오버레이 보임)
+# 디버그 모드 (스크린샷에 오버레이 보임 — 주의: 피드백 루프 발생 가능)
 python -m mallangmollang.main --debug
 
 # OCR 진단 도구
@@ -115,53 +165,28 @@ python tools/ocr_inspect.py --region 100 200 800 400 --delay 3
 
 ---
 
-## 주요 파일 위치
+## 다음 작업 우선순위
 
-```
-mallangmollang/
-├── main.py                     # 앱 진입점, --debug 플래그
-├── core/
-│   ├── ocr.py                  # extract_lines(), LineBox, 문단 병합
-│   ├── translator.py           # translate_lines(), _parse_line_response()
-│   └── pipeline.py             # LineTranslation, 블록 모드 폴백
-├── display/
-│   ├── overlay.py              # TranslatedLine, show_lines(), _paint_lines()
-│   └── area_indicator.py       # 펄스 애니메이션, set_status()
-├── ui/
-│   ├── settings.py             # 단축키 탭 포함
-│   └── toast.py                # 에러 상세 메시지 표시
-├── infra/
-│   └── hotkeys.py              # GlobalHotKeys, reload()
-└── tools/
-    └── ocr_inspect.py          # OCR 바운딩 박스 진단
-```
+### 단기 (안정화)
 
----
+1. **OCR 신뢰도 필터링** — `confidence < 30` 줄 스킵
+2. **OpenAI 프로바이더 구현** — `BaseProvider` 상속, GPT-4o/4o-mini 지원
+3. **Claude 프로바이더 구현** — Anthropic API 연동
+4. **Ollama 프로바이더 구현** — 로컬 모델 연동
 
-## 다음 세션 우선순위
+### 중기 (기능 완성)
 
-### 즉시 해야 할 것
+5. **커서 추적 모드 UI 연결** — 트레이 메뉴에서 모드 전환
+6. **온보딩 화면** — 최초 실행 시 프로바이더 + API 키 설정 가이드
+7. **API 키 암호화** — `infra/crypto.py` 구현
+8. **번역 프로필** — 콘텐츠별 톤/용어집 사전 정의
 
-1. **긴 대화문 번역 테스트 확인**
-   - `--debug` 모드로 실행해서 2~3줄짜리 대화창에서 오버레이 확인
-   - 여전히 1줄만 보인다면 `_paint_lines()` word wrap 영역 재점검
+### 장기 (품질 개선)
 
-2. **오버레이 검은 여백 제거**
-   - `overlay.py:_paint_lines()` — 문단 모드에서 `box_h = line.height` 고정
-   - 번역 텍스트 실제 높이로 `box_h` 재계산: `QFontMetrics.boundingRect(textRect, flags, text).height()`
-
-3. **OCR 신뢰도 필터링**
-   - `pipeline.py`: `line_boxes = [lb for lb in line_boxes if lb.confidence >= 30.0]`
-
-### 그 다음
-
-4. **OpenAI 프로바이더 구현** (`providers/openai.py`)
-   - `BaseProvider` 상속, `translate()` + `translate_vision()` 구현
-   - httpx 비동기, `Authorization: Bearer {api_key}` 헤더
-
-5. **번역 속도 개선**
-   - 변경 감지 threshold 조정 (`detector.hash_threshold`)
-   - 캡처 주기 설정 노출 (`capture.interval_ms`)
+9. **사이드 패널 모드** — 오버레이 대신 화면 한쪽에 번역 히스토리 표시
+10. **스타일 프리셋 저장/불러오기 UI** — 현재 코드상 존재하나 설정 UI에서 관리 불가
+11. **Steam 메타데이터 연동** — 게임 이름으로 번역 프로필 자동 생성
+12. **배포 패키징** — PyInstaller/Nuitka로 단일 실행 파일
 
 ---
 
@@ -169,11 +194,5 @@ mallangmollang/
 
 ```
 말랑몰랑 프로젝트 계속 진행하자. docs/SESSION_HANDOFF.md 읽어줘.
-
-오늘은 아래 순서로 진행할 거야:
-1. 오버레이 검은 여백 문제 수정 (번역 짧을 때 OCR 박스 아래 검은 배경)
-2. OCR 신뢰도 낮은 줄 필터링 추가 (30% 미만 스킵)
-3. [긴 대화문 번역 테스트 결과] → 문제 있으면 overlay.py word wrap 재점검
-
 브랜치: claude/gracious-rubin-w5nsyw
 ```
