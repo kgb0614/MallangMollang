@@ -310,6 +310,9 @@ class App:
 
         self.panel.set_status("● 번역 중...", "rgba(255,210,50,220)")
 
+        if self.config.get("display.mode", "overlay") == "panel":
+            self.side_panel.show()
+
         def run():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -385,8 +388,7 @@ class App:
         display_mode = self.config.get("display.mode", "overlay")
         if display_mode == "panel":
             self.overlay.hide_translation()
-            if self._running:
-                self.side_panel.show()
+            self.side_panel.show()
         else:
             self.side_panel.hide()
 
