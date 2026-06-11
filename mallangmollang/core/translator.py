@@ -172,9 +172,17 @@ class Translator:
         results: list[str | None] = [None] * len(lines)
 
         # 긴 줄: 개별 번역 (번호 형식 없이)
+        # [corrected]+[translated] 두 섹션을 출력해야 하므로 원문 길이 * 8 정도 필요
         for i in long_indices:
-            print(f"[Translator] 줄 {i+1}: {len(lines[i])}자 → 개별 번역")
-            tr = await self.translate_text(lines[i], params)
+            char_count = len(lines[i])
+            long_max_tokens = max(params.max_tokens, char_count * 8 + 512)
+            print(f"[Translator] 줄 {i+1}: {char_count}자 → 개별 번역 (max_tokens={long_max_tokens})")
+            long_params = TranslateParams(
+                temperature=params.temperature,
+                max_tokens=long_max_tokens,
+                system_hint=params.system_hint,
+            )
+            tr = await self.translate_text(lines[i], long_params)
             results[i] = tr.translated
 
         # 짧은 줄: 기존 번호 형식으로 일괄 번역
