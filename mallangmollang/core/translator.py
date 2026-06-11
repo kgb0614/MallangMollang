@@ -310,34 +310,37 @@ class Translator:
 
     def _parse_line_response(self, response: str, expected_count: int) -> list[str]:
         """LLM 응답에서 번호별 번역 결과를 파싱합니다."""
-        # 마크다운 코드 블록 제거
         cleaned = re.sub(r"```[^\n]*\n?", "", response).strip()
 
-        # "N| 텍스트" / "N. 텍스트" / "N) 텍스트" / "N: 텍스트" 패턴 순서대로 시도
-        for sep_pattern in (
-            r"^\d+\|\s*(.+)$",
-            r"^\d+\.\s*(.+)$",
-            r"^\d+\)\s*(.+)$",
-            r"^\d+:\s*(.+)$",
-        ):
-            matches = re.findall(sep_pattern, cleaned, re.MULTILINE)
-            if matches:
-                results = [m.strip() for m in matches]
-                if len(results) == expected_count:
-                    return results
-                # 개수가 다르더라도 부분 매칭이 있으면 패딩해서 반환
+        # 줄이 1개일 때는 전체 응답을 그대로 사용 (정규식으로 자르지 않음)
+        # LLM이 긴 번역을 여러 줄로 나눠 반환해도 전부 보존
+        if expected_count == 1:
+            # "1| 텍스트" 접두사만 제거하고 나머지 전부 반환
+            stripped = re.sub(r"^\d+[|.:)]\s*", "", cleaned, count=1).strip()
+            return [stripped or cleaned]
+
+        # 여러 줄: 번호 구분자로 각 항목 추출
+        # "N| 다음 번호 전까지 전부" 방식으로 다중 줄 번역도 캡처
+        for sep in (r"\|", r"\.", r"\)", r":"):
+            # 각 번호 항목의 시작 위치를 찾아 슬라이싱
+            pattern = rf"^\d+{sep}\s*"
+            positions = [(m.start(), m.end()) for m in re.finditer(pattern, cleaned, re.MULTILINE)]
+            if len(positions) >= expected_count:
+                results = []
+                for i, (_, content_start) in enumerate(positions[:expected_count]):
+                    end = positions[i + 1][0] if i + 1 < len(positions) else len(cleaned)
+                    results.append(cleaned[content_start:end].strip())
                 while len(results) < expected_count:
                     results.append("")
-                return results[:expected_count]
+                return results
 
-        # 구분자 없는 줄 목록으로 시도
+        # 구분자 없는 경우: 비어있지 않은 줄로 분할
         nonempty = [line.strip() for line in cleaned.splitlines() if line.strip()]
         if nonempty:
             while len(nonempty) < expected_count:
                 nonempty.append("")
             return nonempty[:expected_count]
 
-        # 완전 실패: 첫 줄에만 응답 넣고 나머지는 빈 문자열
         return [cleaned] + [""] * (expected_count - 1)
 
 
