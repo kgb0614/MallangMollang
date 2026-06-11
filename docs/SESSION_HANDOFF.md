@@ -1,6 +1,6 @@
 # 말랑몰랑 — 세션 핸드오프 문서
 
-> 최종 업데이트: 2026-06-11  
+> 최종 업데이트: 2026-06-11
 > 현재 브랜치: claude/gracious-rubin-w5nsyw
 
 ---
@@ -13,7 +13,7 @@
 |------|------|------|
 | `core/capture.py` | ✅ 완료 | 매 캡처마다 `with mss.mss()` 사용 (스레드 안전) |
 | `core/detector.py` | ✅ 완료 | 이미지 해시 기반 변경 감지 |
-| `core/cache.py` | ✅ 완료 | LRU 텍스트 캐시 |
+| `core/cache.py` | ✅ 완료 | LRU 텍스트 캐시 (메모리만, 디스크 저장은 P2-1에서 추가 예정) |
 | `core/ocr.py` | ✅ 완료 | `extract_lines()` 문단 병합 + 목록 마커 분리 |
 | `core/translator.py` | ✅ 완료 | 줄 단위 번역, 긴 문단(300자+) 개별, 프로필 hint 주입 |
 | `core/pipeline.py` | ✅ 완료 | `LineTranslation` 줄 단위 흐름 + 진단 로그 + OCR 신뢰도 필터(conf<30) |
@@ -25,33 +25,35 @@
 |------|------|------|
 | `providers/base.py` | ✅ 완료 | `BaseProvider` 추상 인터페이스 |
 | `providers/gemini.py` | ✅ 완료 | AI Studio + Vertex AI, `finishReason` 로깅 |
-| `providers/openai.py` | ❌ 미구현 | 설정 UI만 있음, 호출 시 에러 |
-| `providers/claude.py` | ❌ 미구현 | 동일 |
-| `providers/ollama.py` | ❌ 미구현 | 동일 |
+| `providers/openai.py` | ❌ 미구현 | 설정 UI만 있음, 호출 시 에러. Phase 3 |
+| `providers/claude.py` | ❌ 미구현 | 동일. Phase 3 |
+| `providers/ollama.py` | ❌ 미구현 | 동일. Phase 3 |
 
 ### Display
 
 | 모듈 | 상태 | 비고 |
 |------|------|------|
 | `display/overlay.py` | ✅ 완료 | line/block 모드, 폰트 자동 축소(최소 8pt) + 박스 확장 |
+| `display/panel.py` | ✅ 완료 | QTextBrowser 기반 번역 히스토리. 드래그 이동, 지우기 버튼 |
 | `display/area_indicator.py` | ✅ 완료 | 펄스 애니메이션, `SetWindowDisplayAffinity` 캡처 제외 |
-| `display/presets.py` | ✅ 완료 | 기본 프리셋 3종 |
+| `display/presets.py` | ✅ 완료 | 기본 프리셋 3종 (기본/어두운 게임용/밝은 배경용) |
 
 ### UI
 
 | 모듈 | 상태 | 비고 |
 |------|------|------|
 | `ui/tray.py` | ✅ 완료 | 진단 정보 복사 메뉴 포함 |
-| `ui/settings.py` | ✅ 완료 | 단축키 탭 + 번역 프로필 탭 포함 |
+| `ui/settings.py` | ✅ 완료 | 7탭: 프로바이더, 언어, 캡처, 번역, 표시, 프로필, 단축키 |
 | `ui/region_selector.py` | ✅ 완료 | |
-| `ui/toast.py` | ✅ 완료 | 에러 상세 메시지 표시 |
-| `ui/onboarding.py` | ❌ 미구현 | |
+| `ui/control_panel.py` | ✅ 완료 | 플로팅 컨트롤 패널 (시작/중지/영역/설정) |
+| `ui/toast.py` | ✅ 완료 | 에러 상세 메시지 표시, 4단계 레벨 |
+| `ui/onboarding.py` | ❌ 미구현 | Phase 3 |
 
 ### Infrastructure
 
 | 모듈 | 상태 | 비고 |
 |------|------|------|
-| `infra/config.py` | ✅ 완료 | |
+| `infra/config.py` | ✅ 완료 | 싱글톤, 점 경로 접근, 깊은 병합 |
 | `infra/hotkeys.py` | ✅ 완료 | 글로벌 단축키, 재로드 지원 |
 | `infra/crypto.py` | ✅ 완료 | Fernet 암호화, 머신 고유 키 유도, 자동 마이그레이션 |
 
@@ -69,7 +71,7 @@
 | PRD 항목 | 상태 | 구현 위치 |
 |----------|------|-----------|
 | F1-1 영역 지정 캡처 | ✅ | `core/capture.py`, `ui/region_selector.py` |
-| F1-2 커서 추적 캡처 | ⚠️ 부분 | `capture.capture_around_cursor()` 존재, UI 미연결 |
+| F1-2 커서 추적 캡처 | ❌ 폐기 | 구현 후 실용성 부족으로 revert |
 | F2-1 이미지 해시 비교 | ✅ | `core/detector.py` |
 | F3-1 Tesseract 연동 | ✅ | `core/ocr.py` |
 | F3-2 다국어 인식 | ✅ | OSD 자동 감지 + 수동 설정 |
@@ -81,74 +83,63 @@
 | F5-5 Vision API 모드 | ✅ | `translator.translate_vision()` |
 | F5-6 번역 프로필 | ✅ | `core/profiles.py` + `ui/settings.py` 프로필 탭 + `translator.py` hint 주입 |
 | F6-1 Gemini BYOK | ✅ | `providers/gemini.py` |
+| F6-4 API 키 안전 저장 | ✅ | `infra/crypto.py` Fernet 암호화 |
 | F7-1 오버레이 모드 | ✅ | `display/overlay.py` (line + block) |
+| F7-2 사이드 패널 모드 | ✅ | `display/panel.py` |
 | F8-1 글로벌 단축키 | ✅ | `infra/hotkeys.py` |
 | F8-2 설정 UI | ✅ | `ui/settings.py` |
 | F8-3 설정 저장 | ✅ | `infra/config.py` (JSON) |
 
 ---
 
-## 최근 세션 작업 이력 (2026-06-11)
+## Phase 2 작업 이력 (2026-06-11)
 
-### 진단 도구
+### 완료
 
-1. **번역 로그 파일** — OCR 입력 + 번역 출력을 `translation_log.txt`에 자동 저장
-2. **진단 정보 클립보드 복사** — 트레이 메뉴 "진단 정보 복사"로 마지막 번역 정보 복사
-3. **Gemini finishReason 로깅** — 토큰 한도 도달 등 모델 응답 상태를 콘솔에 출력
+20. **API 키 암호화** — `infra/crypto.py` Fernet 대칭 암호화, PBKDF2 키 유도, ENC: 접두어
+21. **Config 암호화 연동** — `config.py` save/load 시 자동 암호화/복호화, 평문 자동 마이그레이션
+22. **커서 추적 모드** — 구현 후 테스트, 실용성 부족으로 `git revert`로 폐기
+23. **사이드 패널** — `display/panel.py` QTextBrowser 기반 번역 히스토리, 표시 모드 전환 UI
+24. **사이드 패널 표시 버그 수정** — `_on_settings_saved()`에서 `_running` 조건 제거
+25. **사이드 패널 텍스트 잘림 수정** — QLabel → QTextBrowser 교체, `_fit_height()` 높이 계산
 
-### OCR 개선
+### 이전 작업 (Phase 1)
 
-4. **인접 줄 자동 병합** — 같은 문단의 줄이 Tesseract에서 분리된 경우 자동 합침
-5. **목록 마커 분리** — `•`, `-`, `+`, `©`(불릿 오인식) 등으로 시작하는 줄은 병합에서 제외
-6. **`_split_on_list_markers()`** — Tesseract 문단 그룹 내에서도 불릿 항목 개별 분리
-
-### 번역 엔진 개선
-
-7. **긴 문단 개별 번역** — 300자 이상 줄은 `translate_text()`로 개별 번역 (번호 형식 회피)
-8. **max_tokens 동적 계산** — 입력 길이에 비례해 토큰 한도 자동 조정 (`char_count * 8 + 512`)
-9. **`_parse_line_response` 부분 매치** — LLM이 일부 줄만 반환해도 N| 마커 제거
-10. **프롬프트 강화** — "긴 줄은 끝까지 완전 번역, 절대 요약 금지" 지시 추가
-
-### 오버레이 개선
-
-11. **폰트 자동 축소** — OCR 박스에 맞을 때까지 1pt씩 축소 (최소 8pt)
-12. **박스 높이 자동 확장** — 최소 폰트에서도 안 맞으면 배경 박스를 텍스트에 맞게 늘림
-
-### 인프라 수정
-
-13. **mss 스레드 안전** — 매 캡처마다 `with mss.mss()` 사용 (핸들 재사용 제거)
-14. **asyncio 이벤트 루프** — 스냅샷마다 pipeline 재생성으로 Event loop closed 해결
-
-### OCR 신뢰도 필터링
-
-15. **conf < 30 줄 스킵** — `pipeline.py`에서 번역 전 저신뢰도 OCR 결과 자동 제외
-
-### 번역 프로필
-
-16. **`core/profiles.py`** — `TranslationProfile` 데이터 + `ProfileManager` (저장/불러오기/LLM 자동 생성)
-17. **설정 UI 프로필 탭** — 키워드 자동 생성, 수동 편집, 용어집 테이블, 저장/삭제
-18. **시스템 프롬프트 주입** — `translator.py`의 3개 빌더 모두에 `【번역 맥락 정보】` 블록 추가
-19. **`main.py` 연결** — `ProfileManager` 생성, 활성 프로필 적용, 설정 저장 시 재적용
+1~19번 항목은 Phase 1에서 완료. 진단 도구, OCR 개선, 번역 엔진 개선, 오버레이 개선, 인프라 수정, 번역 프로필 등.
 
 ---
 
 ## 알려진 문제
 
-### 🔴 해결 필요
-
-1. **OpenAI/Claude/Ollama 프로바이더 미구현**
-   - 설정에서 선택하면 에러 발생 (현재 Gemini만 동작)
-
 ### 🟡 개선 사항
 
-3. **커서 추적 모드 UI 미연결**
-   - `capture.capture_around_cursor()` 구현됨, 트레이/단축키에서 활성화 불가
+1. **스냅샷 후 오버레이 잔류** — 스냅샷 번역 후 결과가 화면에 계속 남음 (P2-2에서 해결 예정)
+2. **단일 OCR 영역 제한** — 1개 영역만 지정 가능 (P2-4에서 해결 예정)
+3. **좌표 기반 캡처만 지원** — 창 이동 시 영역 어긋남 (P2-6에서 해결 예정)
 
-4. **온보딩 화면 미구현**
-   - 최초 실행 시 API 키 입력 가이드 없음
+### ⚪ 의도적 미구현 (현재 불필요)
 
-5. **사이드 패널 모드 미구현**
-   - `display/panel.py` 존재하지만 빈 파일 또는 미연결
+4. **OpenAI/Claude/Ollama 프로바이더** — 개인 사용 시 Gemini Vertex로 충분
+5. **온보딩 화면** — 개인 사용 목적
+6. **커서 추적 모드** — 폐기 (실용성 부족)
+
+---
+
+## 다음 작업 우선순위
+
+> 상세 스펙: `docs/Phase2-Spec.md` 참조
+
+### Phase 2 — 실사용 편의성
+
+| 순서 | ID | 기능 | 난이도 | 예상 시간 |
+|------|----|------|--------|-----------|
+| 1 | P2-1 | 영속 캐시 (디스크 저장) | 하 | 1~2시간 |
+| 2 | P2-2 | 스냅샷 오버레이 정리 | 하 | 1시간 |
+| 3 | P2-3 | OCR 전처리 미리보기 | 하 | 2~3시간 |
+| 4 | P2-4 | 다중 OCR 영역 | 중상 | 6~8시간 |
+| 5 | P2-5 | 영역 크기 조정·삭제 UI | 중 | 3~4시간 |
+| 6 | P2-6 | 윈도우 지정 캡처 + 제외 영역 | 중 | 4~5시간 |
+| 7 | P2-7 | 클립보드 자동 복사 | 하 | 30분 |
 
 ---
 
@@ -168,26 +159,10 @@ python tools/ocr_inspect.py --region 100 200 800 400 --delay 3
 
 ---
 
-## 다음 작업 우선순위
-
-### Phase 2 — 핵심 기능
-
-1. **사이드 패널 모드** — `display/panel.py` (오버레이 대안, 번역 히스토리 표시)
-
-### Phase 3 — 나중에
-
-2. **커서 추적 모드 UI 연결** — 트레이 메뉴에서 모드 전환
-3. **온보딩 화면** — 최초 실행 시 프로바이더 + API 키 설정 가이드
-4. **OpenAI/Claude/Ollama 프로바이더** — 현재 Gemini만으로 충분, 필요 시 추가
-5. **스타일 프리셋 저장/불러오기 UI**
-6. **Steam 메타데이터 연동** — 번역 프로필 2단계
-7. **배포 패키징** — PyInstaller/Nuitka
-
----
-
 ## 다음 세션 시작 멘트
 
 ```
 말랑몰랑 프로젝트 계속 진행하자. docs/SESSION_HANDOFF.md 읽어줘.
 브랜치: claude/gracious-rubin-w5nsyw
+다음 작업: docs/Phase2-Spec.md의 P2-1 (영속 캐시)부터 진행.
 ```
