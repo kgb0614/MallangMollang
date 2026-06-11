@@ -272,6 +272,8 @@ class App:
             self._on_region_select()
             return
 
+        # 스냅샷마다 파이프라인 새로 생성 (이전 이벤트 루프 참조 방지)
+        self.pipeline = None
         if not self._ensure_pipeline():
             return
 
