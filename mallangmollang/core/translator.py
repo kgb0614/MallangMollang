@@ -162,8 +162,10 @@ class Translator:
         prompt = self._build_line_prompt(lines)
 
         # 입력 텍스트 길이에 비례해 출력 토큰 여유를 줌
+        # 한국어는 1글자≒2~3토큰이므로 원문 길이 * 5 정도로 넉넉히 잡음
         total_chars = sum(len(l) for l in lines)
-        max_tokens = max(params.max_tokens, len(lines) * 80 + 256, total_chars * 3 + 256)
+        max_tokens = max(params.max_tokens, len(lines) * 80 + 256, total_chars * 5 + 512)
+        print(f"[Translator] 입력 {total_chars}자 / max_tokens={max_tokens}")
 
         result = await self.provider.translate(
             prompt,
