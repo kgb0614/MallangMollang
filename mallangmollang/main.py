@@ -78,6 +78,7 @@ class App:
         self.tray.settings_requested.connect(self._on_settings)
         self.tray.region_requested.connect(self._on_region_select)
         self.tray.panel_requested.connect(self._show_panel)
+        self.tray.debug_copy_requested.connect(self._copy_debug_info)
         self.tray.quit_requested.connect(self._on_quit)
 
         # 컨트롤 패널 시그널 (트레이와 동일한 핸들러)
@@ -166,6 +167,14 @@ class App:
         """에러 상세 메시지를 토스트로 표시합니다."""
         short = message if len(message) <= 120 else message[:120] + "…"
         self.toast.show(f"오류: {short}", "error", 5000)
+
+    def _copy_debug_info(self):
+        """마지막 번역 사이클의 진단 정보를 클립보드에 복사합니다."""
+        if self.pipeline and self.pipeline.last_debug_info:
+            QApplication.clipboard().setText(self.pipeline.last_debug_info)
+            self.toast.show("진단 정보가 클립보드에 복사되었습니다.", "success")
+        else:
+            self.toast.show("아직 번역 결과가 없습니다.", "info")
 
     def _start_translation(self):
         """별도 스레드에서 asyncio 번역 루프를 시작합니다."""
@@ -412,6 +421,9 @@ def main():
         from mallangmollang.display.area_indicator import set_debug_capture
         set_debug_capture(True)
         sys.argv.remove("--debug")
+        print("[DEBUG] 디버그 모드 활성화 — 오버레이가 스크린샷에 표시됩니다.")
+        print("[DEBUG] ⚠ 실시간 모드에서는 오버레이가 재캡처되어 피드백 루프가 발생합니다.")
+        print("[DEBUG]   → 스냅샷 모드 사용을 권장합니다.")
 
     qt_app = QApplication(sys.argv)
     qt_app.setQuitOnLastWindowClosed(False)  # 창을 닫아도 트레이에 계속 상주

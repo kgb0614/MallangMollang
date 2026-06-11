@@ -42,6 +42,7 @@ class TrayIcon(QObject):
     settings_requested = pyqtSignal()    # 설정 창 열기
     region_requested = pyqtSignal()      # 영역 재지정
     panel_requested = pyqtSignal()       # 컨트롤 패널 표시
+    debug_copy_requested = pyqtSignal()  # 진단 정보 클립보드 복사
     quit_requested = pyqtSignal()        # 앱 종료
 
     def __init__(self, parent=None):
@@ -75,6 +76,9 @@ class TrayIcon(QObject):
 
         panel_action = menu.addAction("컨트롤 패널 표시")
         panel_action.triggered.connect(self.panel_requested)
+
+        debug_action = menu.addAction("진단 정보 복사")
+        debug_action.triggered.connect(self.debug_copy_requested)
 
         menu.addSeparator()
 

@@ -161,8 +161,9 @@ class Translator:
         system_hint = self._build_line_system_hint(params.system_hint)
         prompt = self._build_line_prompt(lines)
 
-        # 줄 수에 비례해 출력 토큰 여유를 줌 (줄당 최대 80토큰 + 기본 여유)
-        max_tokens = max(params.max_tokens, len(lines) * 80 + 256)
+        # 입력 텍스트 길이에 비례해 출력 토큰 여유를 줌
+        total_chars = sum(len(l) for l in lines)
+        max_tokens = max(params.max_tokens, len(lines) * 80 + 256, total_chars * 3 + 256)
 
         result = await self.provider.translate(
             prompt,
@@ -172,6 +173,9 @@ class Translator:
                 system_hint=system_hint,
             ),
         )
+
+        print(f"[Translator] LLM 응답 ({len(result.translated)}자, 토큰={result.tokens_used}):")
+        print(f"  {result.translated[:300]}{'…' if len(result.translated) > 300 else ''}")
 
         translated_lines = self._parse_line_response(result.translated, len(lines))
 
