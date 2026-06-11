@@ -149,34 +149,58 @@ class Translator:
         """현재 저장된 문맥 기록을 반환합니다."""
         return list(self._context)
 
+    _LONG_LINE_THRESHOLD = 300
+
     async def translate_lines(
         self,
         lines: list[str],
         params: TranslateParams | None = None,
     ) -> list[str]:
-        """OCR 텍스트를 줄 단위로 번역합니다 (오버레이 1:1 매핑용)."""
+        """OCR 텍스트를 줄 단위로 번역합니다 (오버레이 1:1 매핑용).
+
+        긴 줄(300자 이상)은 개별 translate_text로 번역합니다.
+        번호 형식(N|)은 짧은 줄 여러 개에만 적합하고,
+        긴 문단에서는 모델이 중간에 멈추는 문제가 있기 때문입니다.
+        """
         if params is None:
             params = TranslateParams()
 
-        system_hint = self._build_line_system_hint(params.system_hint)
-        prompt = self._build_line_prompt(lines)
+        # 긴 줄과 짧은 줄 분리
+        long_indices = [i for i, l in enumerate(lines) if len(l) >= self._LONG_LINE_THRESHOLD]
+        short_indices = [i for i, l in enumerate(lines) if len(l) < self._LONG_LINE_THRESHOLD]
 
-        # 입력 텍스트 길이에 비례해 출력 토큰 여유를 줌
-        # 한국어는 1글자≒2~3토큰이므로 원문 길이 * 5 정도로 넉넉히 잡음
-        total_chars = sum(len(l) for l in lines)
-        max_tokens = max(params.max_tokens, len(lines) * 80 + 256, total_chars * 5 + 512)
-        print(f"[Translator] 입력 {total_chars}자 / max_tokens={max_tokens}")
+        results: list[str | None] = [None] * len(lines)
 
-        result = await self.provider.translate(
-            prompt,
-            TranslateParams(
-                temperature=params.temperature,
-                max_tokens=max_tokens,
-                system_hint=system_hint,
-            ),
-        )
+        # 긴 줄: 개별 번역 (번호 형식 없이)
+        for i in long_indices:
+            print(f"[Translator] 줄 {i+1}: {len(lines[i])}자 → 개별 번역")
+            tr = await self.translate_text(lines[i], params)
+            results[i] = tr.translated
 
-        translated_lines = self._parse_line_response(result.translated, len(lines))
+        # 짧은 줄: 기존 번호 형식으로 일괄 번역
+        if short_indices:
+            short_lines = [lines[i] for i in short_indices]
+            total_chars = sum(len(l) for l in short_lines)
+            max_tokens = max(params.max_tokens, len(short_lines) * 80 + 256, total_chars * 5 + 512)
+            print(f"[Translator] 짧은 줄 {len(short_lines)}개 ({total_chars}자) / max_tokens={max_tokens}")
+
+            system_hint = self._build_line_system_hint(params.system_hint)
+            prompt = self._build_line_prompt(short_lines)
+
+            result = await self.provider.translate(
+                prompt,
+                TranslateParams(
+                    temperature=params.temperature,
+                    max_tokens=max_tokens,
+                    system_hint=system_hint,
+                ),
+            )
+
+            translated_short = self._parse_line_response(result.translated, len(short_lines))
+            for idx, trans in zip(short_indices, translated_short):
+                results[idx] = trans
+
+        translated_lines = [r or "" for r in results]
 
         if len(set(translated_lines)) == 1 and len(translated_lines) > 1:
             print(f"[Translator] 경고: 모든 줄이 동일한 번역 — 파싱 실패 가능성")

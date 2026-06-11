@@ -147,9 +147,11 @@ class GeminiProvider(BaseProvider):
         try:
             candidate = data["candidates"][0]
             finish_reason = candidate.get("finishReason", "")
+            text = candidate["content"]["parts"][0]["text"].strip()
+            print(f"[Gemini] finishReason={finish_reason}, 응답 {len(text)}자")
             if finish_reason == "MAX_TOKENS":
                 print(f"[Gemini] 경고: 출력 토큰 한도 도달 — 번역이 잘렸을 수 있음")
-            return candidate["content"]["parts"][0]["text"].strip()
+            return text
         except (KeyError, IndexError) as e:
             raise ValueError(f"Gemini 응답 파싱 실패: {e}\n응답: {data}") from e
 
