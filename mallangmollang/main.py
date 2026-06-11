@@ -19,6 +19,7 @@ from mallangmollang.display.presets import get_preset_by_name
 from mallangmollang.ui.tray import TrayIcon
 from mallangmollang.ui.settings import SettingsWindow
 from mallangmollang.ui.region_selector import RegionSelector
+from mallangmollang.core.profiles import ProfileManager
 from mallangmollang.ui.control_panel import ControlPanel
 from mallangmollang.ui.toast import ToastManager
 
@@ -54,6 +55,7 @@ class App:
         self.region_selector = RegionSelector()
         self.hotkeys = HotkeyManager(self.config)
         self.toast = ToastManager.get_instance()
+        self.profile_manager = ProfileManager()
         self.pipeline: Pipeline | None = None
 
         # asyncio 스레드 → Qt 메인 스레드 브리지
@@ -251,10 +253,20 @@ class App:
         self.indicator.hide()
         self.toast.show("번역을 중지합니다.", "info")
 
+    def _apply_profile(self):
+        """활성 번역 프로필을 translator에 반영합니다."""
+        active = self.config.get("translation.active_profile", "")
+        hint = self.profile_manager.build_hint(active)
+        if self.pipeline:
+            self.pipeline.translator.set_profile_hint(hint)
+        if active:
+            print(f"[App] 번역 프로필 적용: {active}")
+
     def _ensure_pipeline(self) -> bool:
         """Pipeline이 없으면 생성합니다. 실패 시 False 반환."""
         if self.pipeline is None:
             self.pipeline = self._build_pipeline()
+            self._apply_profile()
         if self.pipeline is None:
             self.toast.show("API 키가 설정되지 않았습니다.", "error")
             self._on_settings()
@@ -322,7 +334,15 @@ class App:
         if was_running:
             self._stop_translation()
 
-        win = SettingsWindow(self.config)
+        # 프로필 자동 생성용 provider 연결
+        if self._is_provider_configured():
+            try:
+                from mallangmollang.providers import create_provider
+                self.profile_manager._provider = create_provider(self.config)
+            except Exception:
+                pass
+
+        win = SettingsWindow(self.config, profile_manager=self.profile_manager)
         saved = [False]
 
         def on_saved():
@@ -340,12 +360,13 @@ class App:
             # snapshot 모드에서는 자동 시작하지 않음 — 사용자가 직접 클릭
 
     def _on_settings_saved(self):
-        """설정 저장 후 오버레이 프리셋, 패널 모드, 단축키를 갱신합니다."""
+        """설정 저장 후 오버레이 프리셋, 패널 모드, 단축키, 번역 프로필을 갱신합니다."""
         preset_name = self.config.get("display.active_preset", "기본")
         self.overlay.set_preset(get_preset_by_name(preset_name))
         mode = self.config.get("translation.run_mode", "realtime")
         self.panel.set_mode(mode)
         self.hotkeys.reload()
+        self._apply_profile()
 
     def _on_region_select(self):
         """영역 선택 UI를 시작합니다. 패널을 숨겨서 간섭을 방지합니다."""

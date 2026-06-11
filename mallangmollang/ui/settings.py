@@ -8,10 +8,12 @@ from PyQt6.QtWidgets import (
     QLineEdit, QComboBox, QSpinBox, QCheckBox,
     QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QStackedWidget, QTextEdit, QFileDialog, QLabel,
+    QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from PyQt6.QtCore import pyqtSignal
 
 from mallangmollang.infra.config import Config
+from mallangmollang.core.profiles import ProfileManager, TranslationProfile
 
 
 class SettingsWindow(QDialog):
@@ -30,9 +32,10 @@ class SettingsWindow(QDialog):
 
     settings_saved = pyqtSignal()   # 설정 저장 완료 시
 
-    def __init__(self, config: Config, parent=None):
+    def __init__(self, config: Config, profile_manager: ProfileManager | None = None, parent=None):
         super().__init__(parent)
         self.config = config
+        self._profile_manager = profile_manager or ProfileManager()
         self.setWindowTitle("말랑몰랑 설정")
         self.setMinimumWidth(520)
         self.setModal(True)
@@ -49,6 +52,7 @@ class SettingsWindow(QDialog):
         self._tabs.addTab(self._build_capture_tab(), "캡처")
         self._tabs.addTab(self._build_translation_tab(), "번역")
         self._tabs.addTab(self._build_display_tab(), "표시")
+        self._tabs.addTab(self._build_profile_tab(), "번역 프로필")
         self._tabs.addTab(self._build_hotkeys_tab(), "단축키")
         layout.addWidget(self._tabs)
 
@@ -602,9 +606,217 @@ class SettingsWindow(QDialog):
         c.set("hotkeys.toggle_translation", toggle_key)
         c.set("hotkeys.select_region", region_key)
 
+        # 번역 프로필: 활성 프로필 이름 저장
+        active_profile = self._profile_select.currentText()
+        c.set("translation.active_profile", active_profile if active_profile != "(없음)" else "")
+
         c.save()
         self.settings_saved.emit()
         self.accept()
+
+    # ── 번역 프로필 탭 ──
+
+    def _build_profile_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # 프로필 선택 영역
+        select_group = QGroupBox("프로필 선택")
+        select_layout = QHBoxLayout(select_group)
+        self._profile_select = QComboBox()
+        self._profile_select.currentTextChanged.connect(self._on_profile_selected)
+        select_layout.addWidget(self._profile_select)
+
+        delete_btn = QPushButton("삭제")
+        delete_btn.clicked.connect(self._delete_profile)
+        select_layout.addWidget(delete_btn)
+        layout.addWidget(select_group)
+
+        # 자동 생성 영역
+        gen_group = QGroupBox("새 프로필 생성")
+        gen_layout = QHBoxLayout(gen_group)
+        self._profile_keyword = QLineEdit()
+        self._profile_keyword.setPlaceholderText("콘텐츠 이름 입력 (예: 레지던트 이블 2)")
+        gen_layout.addWidget(self._profile_keyword)
+
+        self._generate_btn = QPushButton("자동 생성")
+        self._generate_btn.clicked.connect(self._generate_profile)
+        gen_layout.addWidget(self._generate_btn)
+        layout.addWidget(gen_group)
+
+        # 프로필 편집 영역
+        edit_group = QGroupBox("프로필 내용")
+        edit_form = QFormLayout(edit_group)
+
+        self._profile_name = QLineEdit()
+        self._profile_name.setPlaceholderText("프로필 이름")
+        edit_form.addRow("이름:", self._profile_name)
+
+        self._profile_genre = QLineEdit()
+        self._profile_genre.setPlaceholderText("서바이벌 호러, 3인칭 액션")
+        edit_form.addRow("장르:", self._profile_genre)
+
+        self._profile_tone = QLineEdit()
+        self._profile_tone.setPlaceholderText("긴박한, 어두운, 공포")
+        edit_form.addRow("분위기:", self._profile_tone)
+
+        # 용어집 테이블
+        self._glossary_table = QTableWidget(0, 2)
+        self._glossary_table.setHorizontalHeaderLabels(["원문", "번역"])
+        self._glossary_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._glossary_table.setMinimumHeight(120)
+        edit_form.addRow("용어집:", self._glossary_table)
+
+        glossary_btns = QHBoxLayout()
+        add_term_btn = QPushButton("+ 추가")
+        add_term_btn.clicked.connect(self._add_glossary_row)
+        del_term_btn = QPushButton("- 삭제")
+        del_term_btn.clicked.connect(self._del_glossary_row)
+        glossary_btns.addWidget(add_term_btn)
+        glossary_btns.addWidget(del_term_btn)
+        glossary_btns.addStretch()
+        edit_form.addRow("", glossary_btns)
+
+        self._profile_extra = QTextEdit()
+        self._profile_extra.setPlaceholderText("캐릭터 대사는 반말, 시스템 메시지는 경어체")
+        self._profile_extra.setMaximumHeight(60)
+        edit_form.addRow("추가 지시:", self._profile_extra)
+
+        layout.addWidget(edit_group)
+
+        # 프로필 저장 버튼
+        save_profile_btn = QPushButton("프로필 저장")
+        save_profile_btn.clicked.connect(self._save_profile)
+        layout.addWidget(save_profile_btn)
+
+        layout.addStretch()
+
+        # 프로필 목록 채우기
+        self._refresh_profile_list()
+
+        return tab
+
+    def _refresh_profile_list(self):
+        self._profile_select.blockSignals(True)
+        self._profile_select.clear()
+        self._profile_select.addItem("(없음)")
+        for name in self._profile_manager.profile_names:
+            self._profile_select.addItem(name)
+        active = self.config.get("translation.active_profile", "")
+        if active:
+            idx = self._profile_select.findText(active)
+            if idx >= 0:
+                self._profile_select.setCurrentIndex(idx)
+        self._profile_select.blockSignals(False)
+        self._on_profile_selected(self._profile_select.currentText())
+
+    def _on_profile_selected(self, name: str):
+        if name == "(없음)" or not name:
+            self._profile_name.clear()
+            self._profile_genre.clear()
+            self._profile_tone.clear()
+            self._glossary_table.setRowCount(0)
+            self._profile_extra.clear()
+            return
+        profile = self._profile_manager.get(name)
+        if not profile:
+            return
+        self._profile_name.setText(profile.name)
+        self._profile_genre.setText(profile.genre)
+        self._profile_tone.setText(profile.tone)
+        self._profile_extra.setPlainText(profile.extra_instruction)
+        self._glossary_table.setRowCount(0)
+        for src, dst in profile.glossary.items():
+            row = self._glossary_table.rowCount()
+            self._glossary_table.insertRow(row)
+            self._glossary_table.setItem(row, 0, QTableWidgetItem(src))
+            self._glossary_table.setItem(row, 1, QTableWidgetItem(dst))
+
+    def _add_glossary_row(self):
+        row = self._glossary_table.rowCount()
+        self._glossary_table.insertRow(row)
+        self._glossary_table.setItem(row, 0, QTableWidgetItem(""))
+        self._glossary_table.setItem(row, 1, QTableWidgetItem(""))
+
+    def _del_glossary_row(self):
+        row = self._glossary_table.currentRow()
+        if row >= 0:
+            self._glossary_table.removeRow(row)
+
+    def _get_glossary_from_table(self) -> dict[str, str]:
+        glossary = {}
+        for row in range(self._glossary_table.rowCount()):
+            src_item = self._glossary_table.item(row, 0)
+            dst_item = self._glossary_table.item(row, 1)
+            src = src_item.text().strip() if src_item else ""
+            dst = dst_item.text().strip() if dst_item else ""
+            if src and dst:
+                glossary[src] = dst
+        return glossary
+
+    def _save_profile(self):
+        name = self._profile_name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "프로필 저장", "프로필 이름을 입력하세요.")
+            return
+        profile = TranslationProfile(
+            name=name,
+            genre=self._profile_genre.text().strip(),
+            tone=self._profile_tone.text().strip(),
+            glossary=self._get_glossary_from_table(),
+            extra_instruction=self._profile_extra.toPlainText().strip(),
+        )
+        self._profile_manager.save(profile)
+        self._refresh_profile_list()
+        self._profile_select.setCurrentText(name)
+        QMessageBox.information(self, "프로필 저장", f"'{name}' 프로필이 저장되었습니다.")
+
+    def _delete_profile(self):
+        name = self._profile_select.currentText()
+        if name == "(없음)" or not name:
+            return
+        reply = QMessageBox.question(
+            self, "프로필 삭제", f"'{name}' 프로필을 삭제하시겠습니까?",
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._profile_manager.delete(name)
+            self._refresh_profile_list()
+
+    def _generate_profile(self):
+        keyword = self._profile_keyword.text().strip()
+        if not keyword:
+            QMessageBox.warning(self, "자동 생성", "키워드를 입력하세요.")
+            return
+
+        import asyncio
+
+        self._generate_btn.setEnabled(False)
+        self._generate_btn.setText("생성 중...")
+
+        try:
+            loop = asyncio.new_event_loop()
+            profile = loop.run_until_complete(
+                self._profile_manager.auto_generate(keyword)
+            )
+            loop.close()
+
+            self._profile_name.setText(profile.name)
+            self._profile_genre.setText(profile.genre)
+            self._profile_tone.setText(profile.tone)
+            self._profile_extra.setPlainText(profile.extra_instruction)
+            self._glossary_table.setRowCount(0)
+            for src, dst in profile.glossary.items():
+                row = self._glossary_table.rowCount()
+                self._glossary_table.insertRow(row)
+                self._glossary_table.setItem(row, 0, QTableWidgetItem(src))
+                self._glossary_table.setItem(row, 1, QTableWidgetItem(dst))
+
+            QMessageBox.information(self, "자동 생성", "프로필이 생성되었습니다. 확인 후 [프로필 저장]을 눌러주세요.")
+        except Exception as e:
+            QMessageBox.critical(self, "자동 생성 실패", f"프로필 생성 중 오류: {e}")
+        finally:
+            self._generate_btn.setEnabled(True)
+            self._generate_btn.setText("자동 생성")
 
     def _test_connection(self):
         """현재 선택된 프로바이더로 연결을 테스트합니다."""

@@ -58,6 +58,11 @@ class Translator:
         self.source_lang = source_lang
         self.target_lang = target_lang
         self._context: deque[ContextEntry] = deque(maxlen=context_count)
+        self._profile_hint: str = ""
+
+    def set_profile_hint(self, hint: str):
+        """번역 프로필에서 생성된 시스템 프롬프트 블록을 설정합니다."""
+        self._profile_hint = hint
 
     async def translate_text(
         self,
@@ -237,6 +242,9 @@ class Translator:
             "[translated]: 번역 결과"
         )
 
+        if self._profile_hint:
+            hint += self._profile_hint
+
         if extra_hint:
             hint += f"\n\n추가 지시: {extra_hint}"
 
@@ -256,6 +264,9 @@ class Translator:
             "[corrected]: 이미지에서 읽은 원문\n"
             "[translated]: 번역 결과"
         )
+
+        if self._profile_hint:
+            hint += self._profile_hint
 
         if extra_hint:
             hint += f"\n\n추가 지시: {extra_hint}"
@@ -321,6 +332,9 @@ class Translator:
             "- 원문이 긴 줄은 번역도 반드시 끝까지 완전히 번역하세요. 절대 요약하거나 중간에 생략하지 마세요.\n"
             "- 각 번호의 번역 길이는 원문 길이에 비례해야 합니다."
         )
+
+        if self._profile_hint:
+            hint += self._profile_hint
 
         if extra_hint:
             hint += f"\n\n추가 지시: {extra_hint}"

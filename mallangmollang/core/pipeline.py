@@ -171,6 +171,12 @@ class Pipeline:
             ocr_lang = self.config.get("language.ocr_lang", "auto")
             line_boxes = self.ocr.extract_lines(capture_result.image, lang=ocr_lang)
 
+            # OCR 신뢰도 필터링 — 노이즈(배경 패턴, 아이콘 등) 제거
+            before = len(line_boxes)
+            line_boxes = [lb for lb in line_boxes if lb.confidence >= 30.0]
+            if before != len(line_boxes):
+                print(f"[Pipeline] OCR 신뢰도 필터: {before}줄 → {len(line_boxes)}줄 (conf<30 제외)")
+
             if not line_boxes:
                 return PipelineResult(
                     capture=capture_result,
