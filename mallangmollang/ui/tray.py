@@ -41,6 +41,7 @@ class TrayIcon(QObject):
     toggle_requested = pyqtSignal()      # 번역 시작/중지
     settings_requested = pyqtSignal()    # 설정 창 열기
     region_requested = pyqtSignal()      # 영역 재지정
+    mode_switch_requested = pyqtSignal() # 캡처 모드 전환
     panel_requested = pyqtSignal()       # 컨트롤 패널 표시
     debug_copy_requested = pyqtSignal()  # 진단 정보 클립보드 복사
     quit_requested = pyqtSignal()        # 앱 종료
@@ -73,6 +74,9 @@ class TrayIcon(QObject):
 
         self._region_action = menu.addAction("영역 재지정")
         self._region_action.triggered.connect(self.region_requested)
+
+        self._mode_action = menu.addAction("커서 추적 모드로 전환")
+        self._mode_action.triggered.connect(self.mode_switch_requested)
 
         panel_action = menu.addAction("컨트롤 패널 표시")
         panel_action.triggered.connect(self.panel_requested)
@@ -107,6 +111,13 @@ class TrayIcon(QObject):
         self._toggle_action.setText("번역 중지" if active else "번역 시작")
         status = "번역 중" if active else "대기 중"
         self._tray.setToolTip(f"말랑몰랑 — {status}")
+
+    def set_capture_mode(self, mode: str):
+        """캡처 모드에 따라 메뉴 텍스트를 갱신합니다."""
+        if mode == "cursor":
+            self._mode_action.setText("영역 지정 모드로 전환")
+        else:
+            self._mode_action.setText("커서 추적 모드로 전환")
 
     def show_message(self, title: str, message: str, duration_ms: int = 3000):
         """트레이 풍선 알림을 표시합니다."""

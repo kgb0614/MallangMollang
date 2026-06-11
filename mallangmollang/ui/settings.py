@@ -420,6 +420,11 @@ class SettingsWindow(QDialog):
         self._hotkey_region.setToolTip(self._hotkey_toggle.toolTip())
         form.addRow("영역 선택:", self._hotkey_region)
 
+        self._hotkey_mode = QLineEdit()
+        self._hotkey_mode.setPlaceholderText("<ctrl>+<shift>+m")
+        self._hotkey_mode.setToolTip(self._hotkey_toggle.toolTip())
+        form.addRow("캡처 모드 전환:", self._hotkey_mode)
+
         notice = QLabel("※ 변경 후 저장하면 즉시 적용됩니다.")
         notice.setStyleSheet("color: gray; font-size: 11px;")
 
@@ -553,6 +558,7 @@ class SettingsWindow(QDialog):
         # 단축키 탭
         self._hotkey_toggle.setText(c.get("hotkeys.toggle_translation", "<ctrl>+<shift>+t"))
         self._hotkey_region.setText(c.get("hotkeys.select_region", "<ctrl>+<shift>+r"))
+        self._hotkey_mode.setText(c.get("hotkeys.switch_capture_mode", "<ctrl>+<shift>+m"))
 
     def _save(self):
         """UI 값을 Config에 저장하고 창을 닫습니다."""
@@ -603,8 +609,10 @@ class SettingsWindow(QDialog):
         # 단축키
         toggle_key = self._hotkey_toggle.text().strip() or "<ctrl>+<shift>+t"
         region_key = self._hotkey_region.text().strip() or "<ctrl>+<shift>+r"
+        mode_key = self._hotkey_mode.text().strip() or "<ctrl>+<shift>+m"
         c.set("hotkeys.toggle_translation", toggle_key)
         c.set("hotkeys.select_region", region_key)
+        c.set("hotkeys.switch_capture_mode", mode_key)
 
         # 번역 프로필: 활성 프로필 이름 저장
         active_profile = self._profile_select.currentText()

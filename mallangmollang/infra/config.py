@@ -86,8 +86,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
     # 단축키 설정
     "hotkeys": {
-        "toggle_translation": "<ctrl>+<shift>+t",  # 번역 켜기/끄기
-        "select_region": "<ctrl>+<shift>+r",        # 영역 선택
+        "toggle_translation": "<ctrl>+<shift>+t",   # 번역 켜기/끄기
+        "select_region": "<ctrl>+<shift>+r",         # 영역 선택
+        "switch_capture_mode": "<ctrl>+<shift>+m",  # 캡처 모드 전환
     },
 
     # 앱 설정
