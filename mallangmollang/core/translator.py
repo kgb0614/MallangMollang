@@ -312,11 +312,11 @@ class Translator:
         """LLM 응답에서 번호별 번역 결과를 파싱합니다."""
         cleaned = re.sub(r"```[^\n]*\n?", "", response).strip()
 
-        # 줄이 1개일 때는 전체 응답을 그대로 사용 (정규식으로 자르지 않음)
-        # LLM이 긴 번역을 여러 줄로 나눠 반환해도 전부 보존
+        # 줄이 1개일 때: LLM이 번호 형식으로 나눠도 전부 하나로 합침
+        # "1| 텍스트\n2| 이어서..." → "텍스트 이어서..."
         if expected_count == 1:
-            # "1| 텍스트" 접두사만 제거하고 나머지 전부 반환
             stripped = re.sub(r"^\d+[|.:)]\s*", "", cleaned, count=1).strip()
+            stripped = re.sub(r"\n\d+[|.:)]\s*", " ", stripped).strip()
             return [stripped or cleaned]
 
         # 여러 줄: 번호 구분자로 각 항목 추출

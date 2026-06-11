@@ -157,12 +157,17 @@ class OverlayWindow(QWidget):
             if is_multiline:
                 # 문단 블록: word wrap으로 그림
                 pad = 3
-                text_rect = QRect(line.x + pad, line.y + pad,
-                                  line.width - pad * 2, line.height)
-
-                # 배경은 반드시 원본 전체 영역을 덮음 (번역이 짧아도)
-                box_h = line.height
                 box_w = line.width
+
+                # 번역 텍스트의 실제 높이 계산 (word wrap 적용)
+                measure_rect = QRect(0, 0, box_w - pad * 2, 10000)
+                text_bound = metrics.boundingRect(
+                    measure_rect,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                    line.text,
+                )
+                needed_h = text_bound.height() + pad * 2
+                box_h = max(line.height, needed_h)
 
                 # 배경
                 bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), max(bg.alpha(), 220))
