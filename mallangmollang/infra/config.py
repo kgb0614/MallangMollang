@@ -4,9 +4,12 @@
 모든 모듈은 이 모듈을 통해 설정에 접근해야 합니다.
 """
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
+
+from mallangmollang.infra.crypto import SECRET_PATHS, encrypt, decrypt
 
 
 # 설정 파일 경로 (mallangmollang 패키지 루트 기준)
@@ -124,22 +127,25 @@ class Config:
             try:
                 with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
                     saved = json.load(f)
-                # 기본값 위에 저장된 값을 덮어씁니다 (깊은 병합)
                 self._data = _deep_merge(DEFAULT_CONFIG, saved)
             except (json.JSONDecodeError, OSError) as e:
                 print(f"[Config] 설정 파일 읽기 실패, 기본값 사용: {e}")
                 self._data = _deep_merge(DEFAULT_CONFIG, {})
         else:
-            # 처음 실행: 기본값으로 초기화하고 저장
             self._data = _deep_merge(DEFAULT_CONFIG, {})
             self.save()
+            return
+
+        # 디스크에서 읽은 암호화된 API 키를 복호화 (메모리에는 평문 유지)
+        self._decrypt_secrets()
 
     def save(self):
-        """현재 설정을 config.json에 저장합니다."""
+        """현재 설정을 config.json에 저장합니다. API 키는 암호화되어 저장됩니다."""
         try:
             _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            data = self._encrypt_data_copy()
             with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except OSError as e:
             print(f"[Config] 설정 파일 저장 실패: {e}")
 
@@ -171,6 +177,40 @@ class Config:
             node = node[k]
         node[keys[-1]] = value
         self.save()
+
+    def _decrypt_secrets(self):
+        """디스크에서 읽은 암호화된 API 키를 메모리상 평문으로 변환합니다."""
+        for path in SECRET_PATHS:
+            val = self.get(path, "")
+            if val:
+                self._set_no_save(path, decrypt(val))
+
+    def _encrypt_data_copy(self) -> dict:
+        """저장용으로 _data를 깊은 복사하고 API 키를 암호화합니다."""
+        data = copy.deepcopy(self._data)
+        for path in SECRET_PATHS:
+            keys = path.split(".")
+            node = data
+            for k in keys[:-1]:
+                if not isinstance(node, dict) or k not in node:
+                    node = None
+                    break
+                node = node[k]
+            if node and isinstance(node, dict) and keys[-1] in node:
+                val = node[keys[-1]]
+                if val:
+                    node[keys[-1]] = encrypt(val)
+        return data
+
+    def _set_no_save(self, key_path: str, value: Any):
+        """설정값을 메모리에만 쓰고 파일에 저장하지 않습니다."""
+        keys = key_path.split(".")
+        node = self._data
+        for k in keys[:-1]:
+            if k not in node or not isinstance(node[k], dict):
+                node[k] = {}
+            node = node[k]
+        node[keys[-1]] = value
 
     def get_provider_config(self, provider_name: str) -> dict:
         """특정 프로바이더의 설정 딕셔너리를 반환합니다."""
