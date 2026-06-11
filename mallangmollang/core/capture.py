@@ -49,7 +49,12 @@ class ScreenCapture:
         """
         x, y, w, h = region
         monitor = {"left": x, "top": y, "width": w, "height": h}
-        screenshot = self._get_sct().grab(monitor)
+        try:
+            screenshot = self._get_sct().grab(monitor)
+        except Exception:
+            # mss 핸들이 다른 스레드에서 생성되었거나 만료됨 → 갱신 후 재시도
+            self.close()
+            screenshot = self._get_sct().grab(monitor)
         image = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
 
         return CaptureResult(
