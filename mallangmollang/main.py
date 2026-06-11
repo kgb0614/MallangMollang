@@ -170,9 +170,18 @@ class App:
 
     def _copy_debug_info(self):
         """마지막 번역 사이클의 진단 정보를 클립보드에 복사합니다."""
+        from mallangmollang.core.pipeline import _LOG_PATH
         if self.pipeline and self.pipeline.last_debug_info:
             QApplication.clipboard().setText(self.pipeline.last_debug_info)
-            self.toast.show("진단 정보가 클립보드에 복사되었습니다.", "success")
+            self.toast.show(
+                f"클립보드에 복사됨. 전체 로그: {_LOG_PATH.name}",
+                "success", 4000,
+            )
+        elif _LOG_PATH.exists():
+            self.toast.show(
+                f"로그 파일: {_LOG_PATH}",
+                "info", 5000,
+            )
         else:
             self.toast.show("아직 번역 결과가 없습니다.", "info")
 

@@ -5,6 +5,8 @@
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from PIL import Image
@@ -16,6 +18,9 @@ from mallangmollang.core.ocr import OcrEngine, OcrResult, LineBox
 from mallangmollang.core.translator import Translator
 from mallangmollang.infra.config import Config
 from mallangmollang.providers.base import TranslationResult
+
+# 번역 로그 파일 경로 (프로젝트 루트/translation_log.txt)
+_LOG_PATH = Path(__file__).parent.parent.parent / "translation_log.txt"
 
 
 @dataclass
@@ -174,12 +179,8 @@ class Pipeline:
                     skipped=True,
                 )
 
-            # 진단: OCR 인식 결과
-            print(f"\n{'='*50}")
-            print(f"[Pipeline] OCR 인식 결과 ({len(line_boxes)}줄)")
-            for i, lb in enumerate(line_boxes):
-                print(f"  {i+1}| pos=({lb.x},{lb.y}) size={lb.width}x{lb.height} font={lb.font_pt}pt conf={lb.confidence:.0f}")
-                print(f"     텍스트: {lb.text[:120]}{'…' if len(lb.text) > 120 else ''}")
+            # 진단: 콘솔에 간략 출력
+            print(f"[Pipeline] OCR {len(line_boxes)}줄 인식 → 번역 시작")
 
             # 줄 텍스트 합쳐서 캐시 키로 사용
             combined_text = "\n".join(lb.text for lb in line_boxes)
@@ -213,22 +214,28 @@ class Pipeline:
             line_texts = [lb.text for lb in line_boxes]
             translated_lines = await self.translator.translate_lines(line_texts)
 
-            # 진단: 번역 결과
-            print(f"[Pipeline] 번역 결과 ({len(translated_lines)}줄)")
-            for i, t in enumerate(translated_lines):
-                print(f"  {i+1}| {t[:120]}{'…' if len(t) > 120 else ''}")
-
-            # 진단 정보 저장
-            debug_parts = [f"=== 번역 사이클 ==="]
-            debug_parts.append(f"\n[OCR 입력] ({len(line_boxes)}줄)")
+            # 진단 정보 조립 (전체 텍스트, 잘림 없음)
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            parts = [f"{'='*60}", f"[{ts}]"]
+            parts.append(f"\n▶ OCR 인식 ({len(line_boxes)}줄)")
             for i, lb in enumerate(line_boxes):
-                debug_parts.append(f"  {i+1}| ({lb.x},{lb.y} {lb.width}x{lb.height}) font={lb.font_pt}pt conf={lb.confidence:.0f}")
-                debug_parts.append(f"     {lb.text}")
-            debug_parts.append(f"\n[번역 출력] ({len(translated_lines)}줄)")
+                parts.append(f"  [{i+1}] pos=({lb.x},{lb.y}) size={lb.width}x{lb.height} font={lb.font_pt}pt conf={lb.confidence:.0f}")
+                parts.append(f"      {lb.text}")
+            parts.append(f"\n▶ 번역 결과 ({len(translated_lines)}줄)")
             for i, t in enumerate(translated_lines):
-                debug_parts.append(f"  {i+1}| {t}")
-            self._last_debug_info = "\n".join(debug_parts)
-            print(f"{'='*50}\n")
+                parts.append(f"  [{i+1}] {t}")
+            entry = "\n".join(parts) + "\n"
+
+            # 메모리 저장 (클립보드 복사용)
+            self._last_debug_info = entry
+
+            # 파일에 추가 저장
+            try:
+                with open(_LOG_PATH, "a", encoding="utf-8") as f:
+                    f.write(entry)
+                print(f"[Pipeline] 번역 완료 → {_LOG_PATH.name} 저장됨")
+            except Exception as e:
+                print(f"[Pipeline] 로그 저장 실패: {e}")
 
             # 줄 매핑 품질 검사 — 절반 이상이 비어있으면 블록 모드로 폴백
             nonempty_count = sum(1 for t in translated_lines if t.strip())

@@ -174,14 +174,10 @@ class Translator:
             ),
         )
 
-        print(f"[Translator] LLM 응답 ({len(result.translated)}자, 토큰={result.tokens_used}):")
-        print(f"  {result.translated[:300]}{'…' if len(result.translated) > 300 else ''}")
-
         translated_lines = self._parse_line_response(result.translated, len(lines))
 
-        # 파싱 실패 디버그 로그 (콘솔 확인용)
         if len(set(translated_lines)) == 1 and len(translated_lines) > 1:
-            print(f"[Translator] 줄 파싱 주의: 모든 줄이 동일 — 원시 응답:\n{result.translated[:300]}")
+            print(f"[Translator] 경고: 모든 줄이 동일한 번역 — 파싱 실패 가능성")
 
         # 문맥에 원문/번역을 합쳐서 저장
         joined_source = "\n".join(lines)
