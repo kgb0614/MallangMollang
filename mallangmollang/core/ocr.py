@@ -272,31 +272,33 @@ class OcrEngine:
         results: list[LineBox] = []
 
         for (blk, par), group_lines in para_groups.items():
-            if len(group_lines) == 1:
-                # 단일 줄 — 그대로 사용
-                gl = group_lines[0]
-                font_pt = max(1, round(gl["h"] * 72 / 96 / 1.2))
-                results.append(LineBox(
-                    text=gl["text"],
-                    x=gl["x"], y=gl["y"],
-                    width=gl["w"], height=gl["h"],
-                    confidence=gl["conf"],
-                    font_pt=font_pt,
-                ))
-            else:
-                # 여러 줄 → 하나의 블록으로 합침
-                merged_text = " ".join(gl["text"] for gl in group_lines)
-                min_x = min(gl["x"] for gl in group_lines)
-                min_y = min(gl["y"] for gl in group_lines)
-                max_right = max(gl["x"] + gl["w"] for gl in group_lines)
-                max_bottom = max(gl["y"] + gl["h"] for gl in group_lines)
-                avg_conf = sum(gl["conf"] for gl in group_lines) / len(group_lines)
+            # 문단 내에서도 목록 마커로 시작하는 줄은 별도 항목으로 분리
+            sub_groups = self._split_on_list_markers(group_lines)
+
+            for sub in sub_groups:
+                if len(sub) == 1:
+                    gl = sub[0]
+                    font_pt = max(1, round(gl["h"] * 72 / 96 / 1.2))
+                    results.append(LineBox(
+                        text=gl["text"],
+                        x=gl["x"], y=gl["y"],
+                        width=gl["w"], height=gl["h"],
+                        confidence=gl["conf"],
+                        font_pt=font_pt,
+                    ))
+                    continue
+
+                merged_text = " ".join(gl["text"] for gl in sub)
+                min_x = min(gl["x"] for gl in sub)
+                min_y = min(gl["y"] for gl in sub)
+                max_right = max(gl["x"] + gl["w"] for gl in sub)
+                max_bottom = max(gl["y"] + gl["h"] for gl in sub)
+                avg_conf = sum(gl["conf"] for gl in sub) / len(sub)
 
                 merged_w = max_right - min_x
                 merged_h = max_bottom - min_y
 
-                # 폰트 크기: 개별 줄 높이의 평균 사용 (전체 높이가 아님)
-                avg_line_h = sum(gl["h"] for gl in group_lines) / len(group_lines)
+                avg_line_h = sum(gl["h"] for gl in sub) / len(sub)
                 font_pt = max(1, round(avg_line_h * 72 / 96 / 1.2))
 
                 results.append(LineBox(
@@ -311,6 +313,24 @@ class OcrEngine:
         results.sort(key=lambda lb: lb.y)
         results = self._merge_overlapping_lines(results)
         return self._merge_adjacent_lines(results)
+
+    @staticmethod
+    def _split_on_list_markers(group_lines: list[dict]) -> list[list[dict]]:
+        """문단 내 줄들을 목록 마커 기준으로 분리합니다.
+
+        마커로 시작하는 줄을 만나면 새 그룹을 시작합니다.
+        마커가 아닌 줄은 이전 그룹에 합쳐집니다.
+        """
+        if len(group_lines) <= 1:
+            return [group_lines]
+
+        sub_groups: list[list[dict]] = [[group_lines[0]]]
+        for gl in group_lines[1:]:
+            if _starts_with_list_marker(gl["text"]):
+                sub_groups.append([gl])
+            else:
+                sub_groups[-1].append(gl)
+        return sub_groups
 
     def _merge_overlapping_lines(self, lines: list[LineBox]) -> list[LineBox]:
         """
