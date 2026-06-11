@@ -131,7 +131,7 @@ class OverlayWindow(QWidget):
         """각 줄 위치에 불투명 배경 + 번역 텍스트를 그립니다.
 
         폰트 자동 축소: 번역 텍스트가 OCR 원본 영역에 맞을 때까지
-        폰트 크기를 1pt씩 줄임. 최소 6pt.
+        폰트 크기를 1pt씩 줄임. 최소 8pt. 최소에서도 안 맞으면 박스 높이를 늘림.
         """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -155,9 +155,10 @@ class OverlayWindow(QWidget):
             avail_w = max(1, box_w - pad * 2)
             avail_h = max(1, box_h - pad * 2)
 
-            # OCR 폰트에서 시작, 텍스트가 박스에 맞을 때까지 축소
-            fit_size = max(8, line.font_pt)
-            for size in range(fit_size, 5, -1):
+            # OCR 폰트에서 시작, 최소 8pt까지 축소 시도
+            min_font = 8
+            fit_size = max(min_font, line.font_pt)
+            for size in range(fit_size, min_font - 1, -1):
                 test_font = QFont(p.font_family, size)
                 test_font.setBold(p.font_bold)
                 bound = QFontMetrics(test_font).boundingRect(
@@ -172,7 +173,16 @@ class OverlayWindow(QWidget):
             font.setBold(p.font_bold)
             painter.setFont(font)
 
-            # 배경: OCR 원본 영역을 정확히 덮음
+            # 최소 폰트에서도 안 맞으면 박스 높이를 텍스트에 맞게 늘림
+            final_bound = QFontMetrics(font).boundingRect(
+                QRect(0, 0, avail_w, 10000), text_flags, line.text,
+            )
+            needed_h = final_bound.height() + pad * 2
+            if needed_h > box_h:
+                box_h = needed_h
+                avail_h = box_h - pad * 2
+
+            # 배경
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(bg_opaque))
             painter.drawRoundedRect(line.x, line.y, box_w, box_h, 2, 2)
