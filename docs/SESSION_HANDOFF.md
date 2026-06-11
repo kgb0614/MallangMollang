@@ -15,8 +15,9 @@
 | `core/detector.py` | ✅ 완료 | 이미지 해시 기반 변경 감지 |
 | `core/cache.py` | ✅ 완료 | LRU 텍스트 캐시 |
 | `core/ocr.py` | ✅ 완료 | `extract_lines()` 문단 병합 + 목록 마커 분리 |
-| `core/translator.py` | ✅ 완료 | 줄 단위 번역, 긴 문단(300자+) 개별 번역 분리 |
-| `core/pipeline.py` | ✅ 완료 | `LineTranslation` 줄 단위 흐름 + 진단 로그 파일 저장 |
+| `core/translator.py` | ✅ 완료 | 줄 단위 번역, 긴 문단(300자+) 개별, 프로필 hint 주입 |
+| `core/pipeline.py` | ✅ 완료 | `LineTranslation` 줄 단위 흐름 + 진단 로그 + OCR 신뢰도 필터(conf<30) |
+| `core/profiles.py` | ✅ 완료 | 번역 프로필 관리 (저장/불러오기/LLM 자동 생성) |
 
 ### Providers
 
@@ -41,7 +42,7 @@
 | 모듈 | 상태 | 비고 |
 |------|------|------|
 | `ui/tray.py` | ✅ 완료 | 진단 정보 복사 메뉴 포함 |
-| `ui/settings.py` | ✅ 완료 | 단축키 탭 포함 |
+| `ui/settings.py` | ✅ 완료 | 단축키 탭 + 번역 프로필 탭 포함 |
 | `ui/region_selector.py` | ✅ 완료 | |
 | `ui/toast.py` | ✅ 완료 | 에러 상세 메시지 표시 |
 | `ui/onboarding.py` | ❌ 미구현 | |
@@ -78,6 +79,7 @@
 | F5-2 문맥 기억 | ✅ | `deque(maxlen=context_count)` |
 | F5-3 번역 방향 설정 | ✅ | `language.source` / `language.target` 설정 |
 | F5-5 Vision API 모드 | ✅ | `translator.translate_vision()` |
+| F5-6 번역 프로필 | ✅ | `core/profiles.py` + `ui/settings.py` 프로필 탭 + `translator.py` hint 주입 |
 | F6-1 Gemini BYOK | ✅ | `providers/gemini.py` |
 | F7-1 오버레이 모드 | ✅ | `display/overlay.py` (line + block) |
 | F8-1 글로벌 단축키 | ✅ | `infra/hotkeys.py` |
@@ -117,6 +119,17 @@
 13. **mss 스레드 안전** — 매 캡처마다 `with mss.mss()` 사용 (핸들 재사용 제거)
 14. **asyncio 이벤트 루프** — 스냅샷마다 pipeline 재생성으로 Event loop closed 해결
 
+### OCR 신뢰도 필터링
+
+15. **conf < 30 줄 스킵** — `pipeline.py`에서 번역 전 저신뢰도 OCR 결과 자동 제외
+
+### 번역 프로필
+
+16. **`core/profiles.py`** — `TranslationProfile` 데이터 + `ProfileManager` (저장/불러오기/LLM 자동 생성)
+17. **설정 UI 프로필 탭** — 키워드 자동 생성, 수동 편집, 용어집 테이블, 저장/삭제
+18. **시스템 프롬프트 주입** — `translator.py`의 3개 빌더 모두에 `【번역 맥락 정보】` 블록 추가
+19. **`main.py` 연결** — `ProfileManager` 생성, 활성 프로필 적용, 설정 저장 시 재적용
+
 ---
 
 ## 알려진 문제
@@ -124,30 +137,21 @@
 ### 🔴 해결 필요
 
 1. **OpenAI/Claude/Ollama 프로바이더 미구현**
-   - 설정에서 선택하면 에러 발생
+   - 설정에서 선택하면 에러 발생 (현재 Gemini만 동작)
 
-2. **OCR 신뢰도 필터링 없음**
-   - 화면 일부 의미 없는 글자를 잡아서 번역 시도
-   - 해결책: `LineBox.confidence < 30.0`이면 스킵
-
-3. **API 키 평문 저장**
+2. **API 키 평문 저장**
    - `infra/crypto.py` 미구현
 
 ### 🟡 개선 사항
 
-4. **커서 추적 모드 UI 미연결**
+3. **커서 추적 모드 UI 미연결**
    - `capture.capture_around_cursor()` 구현됨, 트레이/단축키에서 활성화 불가
 
-5. **온보딩 화면 미구현**
+4. **온보딩 화면 미구현**
    - 최초 실행 시 API 키 입력 가이드 없음
 
-6. **사이드 패널 모드 미구현**
+5. **사이드 패널 모드 미구현**
    - `display/panel.py` 존재하지만 빈 파일 또는 미연결
-
-7. **번역 프로필 미구현**
-   - PRD의 F5-6 (톤/용어집/문맥 사전 정의)
-   - 구현 계획 확정: `core/profiles.py` + 설정 UI 탭 + LLM 자동 생성
-   - 상세 설계는 `docs/ROADMAP.md` Phase 2-1 참조
 
 ---
 
@@ -169,26 +173,22 @@ python tools/ocr_inspect.py --region 100 200 800 400 --delay 3
 
 ## 다음 작업 우선순위
 
-### 단기 (안정화)
+### Phase 1 — 안정화
 
-1. **OCR 신뢰도 필터링** — `confidence < 30` 줄 스킵
-2. **OpenAI 프로바이더 구현** — `BaseProvider` 상속, GPT-4o/4o-mini 지원
-3. **Claude 프로바이더 구현** — Anthropic API 연동
-4. **Ollama 프로바이더 구현** — 로컬 모델 연동
+1. **API 키 암호화** — `infra/crypto.py` (Fernet 대칭 암호화, 평문→암호화 마이그레이션)
 
-### 중기 (기능 완성)
+### Phase 2 — 핵심 기능
 
-5. **커서 추적 모드 UI 연결** — 트레이 메뉴에서 모드 전환
-6. **온보딩 화면** — 최초 실행 시 프로바이더 + API 키 설정 가이드
-7. **API 키 암호화** — `infra/crypto.py` 구현
-8. **번역 프로필** — 콘텐츠별 톤/용어집 사전 정의
+2. **사이드 패널 모드** — `display/panel.py` (오버레이 대안, 번역 히스토리 표시)
 
-### 장기 (품질 개선)
+### Phase 3 — 나중에
 
-9. **사이드 패널 모드** — 오버레이 대신 화면 한쪽에 번역 히스토리 표시
-10. **스타일 프리셋 저장/불러오기 UI** — 현재 코드상 존재하나 설정 UI에서 관리 불가
-11. **Steam 메타데이터 연동** — 게임 이름으로 번역 프로필 자동 생성
-12. **배포 패키징** — PyInstaller/Nuitka로 단일 실행 파일
+3. **커서 추적 모드 UI 연결** — 트레이 메뉴에서 모드 전환
+4. **온보딩 화면** — 최초 실행 시 프로바이더 + API 키 설정 가이드
+5. **OpenAI/Claude/Ollama 프로바이더** — 현재 Gemini만으로 충분, 필요 시 추가
+6. **스타일 프리셋 저장/불러오기 UI**
+7. **Steam 메타데이터 연동** — 번역 프로필 2단계
+8. **배포 패키징** — PyInstaller/Nuitka
 
 ---
 
