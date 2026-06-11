@@ -4,10 +4,11 @@
 """
 
 from datetime import datetime
+from html import escape as html_escape
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QLabel, QFrame, QPushButton, QSizePolicy,
+    QLabel, QFrame, QPushButton, QTextBrowser,
 )
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
@@ -38,6 +39,15 @@ _STYLE = """
     }
 """
 
+_ENTRY_STYLE = """
+    QTextBrowser {
+        background: rgba(35, 35, 48, 200);
+        border-radius: 6px;
+        border: none;
+        padding: 8px;
+    }
+"""
+
 
 class SidePanel(QWidget):
     """
@@ -54,7 +64,7 @@ class SidePanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._entries: list[QFrame] = []
+        self._entries: list[QTextBrowser] = []
         self._drag_pos: QPoint | None = None
         self._setup_window()
         self._setup_ui()
@@ -155,57 +165,44 @@ class SidePanel(QWidget):
 
         ts = datetime.now().strftime("%H:%M:%S")
 
-        entry = QFrame()
-        entry.setStyleSheet("""
-            QFrame {
-                background: rgba(35, 35, 48, 200);
-                border-radius: 6px;
-            }
-        """)
-        entry.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
+        browser = QTextBrowser()
+        browser.setReadOnly(True)
+        browser.setFrameShape(QFrame.Shape.NoFrame)
+        browser.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        layout = QVBoxLayout(entry)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(2)
-        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
-
-        # 타임스탬프
-        ts_lbl = QLabel(ts)
-        ts_lbl.setStyleSheet("color: rgba(100,160,220,180); font-size: 9px;")
-        layout.addWidget(ts_lbl)
-
-        # 원문 (있으면)
-        if original.strip():
-            orig_lbl = QLabel(original.strip())
-            orig_lbl.setWordWrap(True)
-            orig_lbl.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
-            orig_lbl.setStyleSheet(
-                "color: rgba(150,150,170,200); font-size: 11px;"
-            )
-            orig_lbl.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-            )
-            layout.addWidget(orig_lbl)
-
-        # 번역문
-        trans_lbl = QLabel(translated.strip())
-        trans_lbl.setWordWrap(True)
-        trans_lbl.setTextInteractionFlags(
+        browser.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        browser.setOpenLinks(False)
+        browser.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        trans_lbl.setStyleSheet(
-            "color: rgba(230,230,240,240); font-size: 13px;"
-        )
-        trans_lbl.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-        )
-        layout.addWidget(trans_lbl)
+        browser.setStyleSheet(_ENTRY_STYLE)
 
-        self._list.insertWidget(0, entry)
-        self._entries.insert(0, entry)
+        # HTML로 타임스탬프 + 원문 + 번역문 구성
+        parts = [
+            '<p style="color:rgba(100,160,220,180); font-size:9px; margin:0;">'
+            f'{ts}</p>'
+        ]
+        if original.strip():
+            safe_orig = html_escape(original.strip()).replace("\n", "<br>")
+            parts.append(
+                '<p style="color:rgba(150,150,170,200); font-size:11px; margin:2px 0 0 0;">'
+                f'{safe_orig}</p>'
+            )
+        safe_trans = html_escape(translated.strip()).replace("\n", "<br>")
+        parts.append(
+            '<p style="color:rgba(230,230,240,240); font-size:13px; margin:2px 0 0 0;">'
+            f'{safe_trans}</p>'
+        )
+        browser.setHtml("".join(parts))
+
+        # 텍스트 내용에 맞게 높이 고정
+        self._fit_height(browser)
+
+        self._list.insertWidget(0, browser)
+        self._entries.insert(0, browser)
 
         # 항목 수 제한
         while len(self._entries) > _MAX_ENTRIES:
@@ -216,6 +213,15 @@ class SidePanel(QWidget):
         # 맨 위로 스크롤
         self._scroll.verticalScrollBar().setValue(0)
 
+    def _fit_height(self, browser: QTextBrowser):
+        """QTextBrowser의 문서 높이를 계산하여 위젯 높이를 고정합니다."""
+        w = self._scroll.viewport().width()
+        if w < 50:
+            w = self.width() - 24
+        doc = browser.document()
+        doc.setTextWidth(w - 24)
+        browser.setFixedHeight(int(doc.size().height()) + 20)
+
     def clear(self):
         """히스토리를 모두 지웁니다."""
         for entry in self._entries:
@@ -223,6 +229,12 @@ class SidePanel(QWidget):
             entry.deleteLater()
         self._entries.clear()
         self._empty_label.show()
+
+    # 패널 리사이즈 시 모든 항목 높이 재계산
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        for entry in self._entries:
+            self._fit_height(entry)
 
     # 둥근 반투명 배경
     def paintEvent(self, event):
