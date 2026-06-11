@@ -150,8 +150,9 @@ class OverlayWindow(QWidget):
             single_line_width = metrics.horizontalAdvance(line.text)
             line_height = metrics.height()
 
-            # 한 줄에 들어가는지 판단 (바운딩 박스 너비 기준)
-            is_multiline = single_line_width > line.width and line.height > line_height * 1.3
+            # OCR 박스 높이가 줄 높이의 1.3배 초과면 다중 줄 블록으로 판단
+            # (번역 텍스트 길이가 아닌 원본 영역 크기 기준)
+            is_multiline = line.height > line_height * 1.3
 
             if is_multiline:
                 # 문단 블록: word wrap으로 그림
@@ -159,11 +160,8 @@ class OverlayWindow(QWidget):
                 text_rect = QRect(line.x + pad, line.y + pad,
                                   line.width - pad * 2, line.height)
 
-                # 실제 텍스트 영역 계산
-                bounding = metrics.boundingRect(
-                    text_rect, Qt.TextFlag.TextWordWrap, line.text,
-                )
-                box_h = max(line.height, bounding.height() + pad * 2)
+                # 배경은 반드시 원본 전체 영역을 덮음 (번역이 짧아도)
+                box_h = line.height
                 box_w = line.width
 
                 # 배경
