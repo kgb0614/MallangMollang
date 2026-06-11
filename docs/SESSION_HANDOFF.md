@@ -53,7 +53,7 @@
 |------|------|------|
 | `infra/config.py` | ✅ 완료 | |
 | `infra/hotkeys.py` | ✅ 완료 | 글로벌 단축키, 재로드 지원 |
-| `infra/crypto.py` | ❌ 미구현 | API 키 평문 저장 중 |
+| `infra/crypto.py` | ✅ 완료 | Fernet 암호화, 머신 고유 키 유도, 자동 마이그레이션 |
 
 ### 기타
 
@@ -139,9 +139,6 @@
 1. **OpenAI/Claude/Ollama 프로바이더 미구현**
    - 설정에서 선택하면 에러 발생 (현재 Gemini만 동작)
 
-2. **API 키 평문 저장**
-   - `infra/crypto.py` 미구현
-
 ### 🟡 개선 사항
 
 3. **커서 추적 모드 UI 미연결**
@@ -173,22 +170,18 @@ python tools/ocr_inspect.py --region 100 200 800 400 --delay 3
 
 ## 다음 작업 우선순위
 
-### Phase 1 — 안정화
-
-1. **API 키 암호화** — `infra/crypto.py` (Fernet 대칭 암호화, 평문→암호화 마이그레이션)
-
 ### Phase 2 — 핵심 기능
 
-2. **사이드 패널 모드** — `display/panel.py` (오버레이 대안, 번역 히스토리 표시)
+1. **사이드 패널 모드** — `display/panel.py` (오버레이 대안, 번역 히스토리 표시)
 
 ### Phase 3 — 나중에
 
-3. **커서 추적 모드 UI 연결** — 트레이 메뉴에서 모드 전환
-4. **온보딩 화면** — 최초 실행 시 프로바이더 + API 키 설정 가이드
-5. **OpenAI/Claude/Ollama 프로바이더** — 현재 Gemini만으로 충분, 필요 시 추가
-6. **스타일 프리셋 저장/불러오기 UI**
-7. **Steam 메타데이터 연동** — 번역 프로필 2단계
-8. **배포 패키징** — PyInstaller/Nuitka
+2. **커서 추적 모드 UI 연결** — 트레이 메뉴에서 모드 전환
+3. **온보딩 화면** — 최초 실행 시 프로바이더 + API 키 설정 가이드
+4. **OpenAI/Claude/Ollama 프로바이더** — 현재 Gemini만으로 충분, 필요 시 추가
+5. **스타일 프리셋 저장/불러오기 UI**
+6. **Steam 메타데이터 연동** — 번역 프로필 2단계
+7. **배포 패키징** — PyInstaller/Nuitka
 
 ---
 

@@ -238,7 +238,7 @@
 - ⬜ Vision API 모드 UI 연결 (백엔드는 구현됨)
 - ✅ 번역 프로필 — 수동 설정 + LLM 자동 생성 (`core/profiles.py` + 설정 UI 탭)
 - ⬜ 스타일 프리셋 저장/불러오기 UI
-- ⬜ API 키 암호화 저장
+- ✅ API 키 암호화 저장 (`infra/crypto.py` Fernet 암호화)
 
 ### Phase 3 (확장)
 
