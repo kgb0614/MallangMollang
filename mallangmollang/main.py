@@ -88,10 +88,12 @@ class App:
         self._loop_thread: threading.Thread | None = None
         self._running = False
         self._snapshot_running = False
-        self._edit_mode = False
-        self._edit_handles: list = []
+
+        # 영역 핸들: 영역 지정 즉시 표시, 항상 편집 가능
+        self._region_handles: dict[int, "RegionHandle"] = {}
 
         self._connect_signals()
+        self._init_region_handles()
 
     def _connect_signals(self):
         """각 컴포넌트의 시그널을 슬롯에 연결합니다."""
@@ -100,7 +102,6 @@ class App:
         self.tray.settings_requested.connect(self._on_settings)
         self.tray.region_requested.connect(self._on_region_select)
         self.tray.panel_requested.connect(self._show_panel)
-        self.tray.region_edit_requested.connect(self._on_region_edit)
         self.tray.ocr_preview_requested.connect(self._on_ocr_preview)
         self.tray.debug_copy_requested.connect(self._copy_debug_info)
         self.tray.quit_requested.connect(self._on_quit)
@@ -225,6 +226,10 @@ class App:
         elif status == "error":
             self.panel.set_status("● 오류 발생", "rgba(220,50,50,220)")
 
+        # 스냅샷 완료 후 영역 핸들 복원
+        if status in ("idle", "error") and not self._running:
+            self._show_region_handles()
+
     def _on_error_detail(self, message: str):
         """에러 상세 메시지를 토스트로 표시합니다."""
         short = message if len(message) <= 120 else message[:120] + "…"
@@ -269,6 +274,7 @@ class App:
         self._running = True
         self.tray.set_active(True)
         self.panel.set_active(True)
+        self._hide_region_handles()
 
         # 영역별 인디케이터 표시
         if regions:
@@ -334,6 +340,7 @@ class App:
             ov.hide_translation()
         for ind in self._indicators.values():
             ind.hide()
+        self._show_region_handles()
         self.toast.show("번역을 중지합니다.", "info")
 
     def _apply_profile(self):
@@ -374,6 +381,7 @@ class App:
             return
 
         self._snapshot_running = True
+        self._hide_region_handles()
 
         # 영역별 인디케이터 표시
         if regions:
@@ -433,11 +441,39 @@ class App:
         else:
             ov.set_snapshot_mode(False)
 
+    def _init_region_handles(self):
+        """앱 시작 시 기존 영역들의 편집 핸들을 생성합니다."""
+        from mallangmollang.ui.region_editor import RegionHandle
+
+        for r in self.config.get_all_regions():
+            handle = RegionHandle(r["id"], r.get("name", ""), r["rect"])
+            handle.region_changed.connect(self._on_region_handle_changed)
+            handle.region_deleted.connect(self._on_region_handle_deleted)
+            handle.show()
+            self._region_handles[r["id"]] = handle
+
+    def _create_region_handle(self, region_id: int, name: str, rect: list[int]):
+        """새 영역에 대한 편집 핸들을 생성하고 표시합니다."""
+        from mallangmollang.ui.region_editor import RegionHandle
+
+        handle = RegionHandle(region_id, name, rect)
+        handle.region_changed.connect(self._on_region_handle_changed)
+        handle.region_deleted.connect(self._on_region_handle_deleted)
+        handle.show()
+        self._region_handles[region_id] = handle
+
+    def _show_region_handles(self):
+        """모든 영역 핸들을 표시합니다."""
+        for handle in self._region_handles.values():
+            handle.show()
+
+    def _hide_region_handles(self):
+        """모든 영역 핸들을 숨깁니다 (번역 중에는 방해되지 않도록)."""
+        for handle in self._region_handles.values():
+            handle.hide()
+
     def _on_dismiss(self):
-        """ESC 키로 모든 오버레이와 영역 표시를 숨깁니다. 편집 모드면 종료합니다."""
-        if self._edit_mode:
-            self._exit_edit_mode()
-            return
+        """ESC 키로 모든 오버레이를 숨깁니다. 영역 핸들은 유지됩니다."""
         self.overlay.hide_translation()
         self.indicator.hide()
         for ov in self._overlays.values():
@@ -454,45 +490,6 @@ class App:
         if region_id in self._indicators:
             self._indicators[region_id].hide()
 
-    def _on_region_edit(self):
-        """영역 편집 모드를 토글합니다."""
-        if self._edit_mode:
-            self._exit_edit_mode()
-        else:
-            self._enter_edit_mode()
-
-    def _enter_edit_mode(self):
-        """영역 편집 모드 진입 — 번역 중지, 핸들 표시."""
-        if self._running:
-            self._stop_translation()
-
-        from mallangmollang.ui.region_editor import RegionHandle
-
-        regions = self.config.get_all_regions()
-        if not regions:
-            self.toast.show("편집할 영역이 없습니다. 먼저 영역을 추가하세요.", "warning")
-            return
-
-        self._edit_mode = True
-        self._edit_handles = []
-        for r in regions:
-            handle = RegionHandle(r["id"], r.get("name", ""), r["rect"])
-            handle.region_changed.connect(self._on_region_handle_changed)
-            handle.region_deleted.connect(self._on_region_handle_deleted)
-            handle.show()
-            self._edit_handles.append(handle)
-
-        self.toast.show("영역 편집 모드 — 드래그로 이동/리사이즈, ✕로 삭제, ESC로 완료", "info", 5000)
-
-    def _exit_edit_mode(self):
-        """영역 편집 모드 종료 — 핸들 숨김, 설정 저장."""
-        self._edit_mode = False
-        for handle in self._edit_handles:
-            handle.hide()
-            handle.deleteLater()
-        self._edit_handles = []
-        self.toast.show("영역 편집 완료", "success")
-
     def _on_region_handle_changed(self, region_id: int, rect: list[int]):
         """편집 핸들에서 영역 위치/크기가 변경되었을 때."""
         self.config.update_region(region_id, rect=rect)
@@ -500,9 +497,11 @@ class App:
     def _on_region_handle_deleted(self, region_id: int):
         """편집 핸들에서 영역 삭제가 요청되었을 때."""
         self.config.remove_region(region_id)
-        # 해당 핸들 제거
-        self._edit_handles = [h for h in self._edit_handles if h.region_id != region_id]
-        # 영역별 오버레이/인디케이터도 정리
+        # 해당 핸들 제거 및 정리
+        handle = self._region_handles.pop(region_id, None)
+        if handle:
+            handle.hide()
+            handle.deleteLater()
         if region_id in self._overlays:
             self._overlays.pop(region_id).deleteLater()
         if region_id in self._indicators:
@@ -607,7 +606,7 @@ class App:
         self.region_selector.start()
 
     def _on_region_selected(self, region: tuple):
-        """영역 선택 완료 후 Config에 추가합니다."""
+        """영역 선택 완료 후 Config에 추가하고 편집 핸들을 즉시 표시합니다."""
         x, y, w, h = region
         regions = self.config.get_all_regions()
         if len(regions) >= 5:
@@ -616,6 +615,9 @@ class App:
             return
         new_region = self.config.add_region([x, y, w, h])
         if new_region:
+            self._create_region_handle(
+                new_region["id"], new_region["name"], new_region["rect"],
+            )
             self.toast.show(f"영역 추가: {new_region['name']} ({w}×{h})", "success")
         self.panel.show()
         mode = self.config.get("translation.run_mode", "realtime")
