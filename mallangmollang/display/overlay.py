@@ -35,17 +35,6 @@ class TranslatedLine:
     font_pt: int     # OCR에서 추정한 폰트 크기
 
 
-@dataclass
-class TranslatedParagraph:
-    """오버레이에 표시할 문단 정보"""
-    text: str        # 문단 전체 번역 텍스트
-    x: int
-    y: int
-    width: int
-    height: int
-    font_pt: int
-
-
 class OverlayWindow(QWidget):
     """
     번역 결과를 표시하는 투명 오버레이 창.
@@ -62,9 +51,8 @@ class OverlayWindow(QWidget):
         self.preset = preset or PRESET_DEFAULT
         self._text = ""
         self._lines: list[TranslatedLine] = []
-        self._paragraphs: list[TranslatedParagraph] = []
         self._current_region: tuple[int, int, int, int] | None = None
-        self._mode = "line"  # "line" | "paragraph" | "block"
+        self._mode = "line"  # "line" | "block"
         self._snapshot_mode = False
 
         # 스냅샷 자동 정리 타이머
@@ -97,27 +85,6 @@ class OverlayWindow(QWidget):
         self._lines = lines
         self._text = ""
         self._mode = "line"
-
-        if region is not None:
-            x, y, w, h = region
-            self._current_region = region
-            self.setFixedSize(w, h)
-            self.move(x, y)
-
-        self.update()
-        if not self.isVisible():
-            self.show()
-
-    def show_paragraphs(
-        self,
-        paragraphs: list[TranslatedParagraph],
-        region: tuple[int, int, int, int] | None = None,
-    ):
-        """문단 단위 번역 결과를 각 문단 위치에 표시합니다."""
-        self._paragraphs = paragraphs
-        self._lines = []
-        self._text = ""
-        self._mode = "paragraph"
 
         if region is not None:
             x, y, w, h = region
@@ -197,9 +164,7 @@ class OverlayWindow(QWidget):
         self.move(x, y)
 
     def paintEvent(self, event):
-        if self._mode == "paragraph" and self._paragraphs:
-            self._paint_paragraphs()
-        elif self._mode == "line" and self._lines:
+        if self._mode == "line" and self._lines:
             self._paint_lines()
         elif self._mode == "block" and self._text:
             self._paint_block()
@@ -275,73 +240,6 @@ class OverlayWindow(QWidget):
             # 본문 텍스트
             painter.setPen(QPen(text_color))
             painter.drawText(draw_rect, text_flags, line.text)
-
-        painter.end()
-
-    def _paint_paragraphs(self):
-        """문단 단위로 번역 텍스트를 원문 영역에 자연스럽게 흘려 표시합니다."""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-
-        p = self.preset
-        bg = QColor(*p.bg_color)
-        bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), 255)
-        text_color = QColor(*p.text_color)
-        text_flags = (Qt.AlignmentFlag.AlignLeft
-                      | Qt.AlignmentFlag.AlignTop
-                      | Qt.TextFlag.TextWordWrap)
-
-        region_w = self.width()
-        pad = 4
-
-        for para in self._paragraphs:
-            if not para.text.strip():
-                continue
-
-            font_size = max(10, para.font_pt)
-            font = QFont(p.font_family, font_size)
-            font.setBold(p.font_bold)
-            painter.setFont(font)
-
-            # 문단 너비: 원문 영역 기준, 영역 끝까지 확장
-            box_x = para.x
-            box_w = max(para.width, region_w - para.x)
-            avail_w = max(1, box_w - pad * 2)
-
-            # 번역 텍스트에 필요한 높이 계산
-            text_bound = QFontMetrics(font).boundingRect(
-                QRect(0, 0, avail_w, 10000), text_flags, para.text,
-            )
-            box_h = max(para.height, text_bound.height() + pad * 2)
-
-            # 불투명 배경
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(bg_opaque))
-            painter.drawRect(box_x, para.y, box_w, box_h)
-
-            # 텍스트 영역
-            draw_rect = QRect(box_x + pad, para.y + pad, avail_w, box_h - pad)
-
-            # 이중 외곽선
-            if p.outline:
-                outer_color = QColor(*p.outline_color)
-                painter.setPen(QPen(outer_color, 4))
-                for dx, dy in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
-                    painter.drawText(
-                        draw_rect.adjusted(dx, dy, dx, dy),
-                        text_flags, para.text,
-                    )
-                painter.setPen(QPen(outer_color, 2))
-                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    painter.drawText(
-                        draw_rect.adjusted(dx, dy, dx, dy),
-                        text_flags, para.text,
-                    )
-
-            # 본문 텍스트
-            painter.setPen(QPen(text_color))
-            painter.drawText(draw_rect, text_flags, para.text)
 
         painter.end()
 

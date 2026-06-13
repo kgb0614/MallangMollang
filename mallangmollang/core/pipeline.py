@@ -31,83 +31,12 @@ class LineTranslation:
 
 
 @dataclass
-class ParagraphTranslation:
-    """문단 단위 번역 결과 — 오버레이에 자연스러운 텍스트 흐름으로 표시"""
-    translated: str          # 문단 전체의 번역 텍스트
-    x: int                   # 문단 시작 x (줄들의 최소 x)
-    y: int                   # 문단 시작 y (첫 줄의 y)
-    width: int               # 문단 너비 (줄들의 최대 너비)
-    height: int              # 원문 문단의 총 높이
-    font_pt: int             # 대표 폰트 크기 (줄들의 중앙값)
-
-
-def _group_lines_into_paragraphs(line_boxes: list[LineBox]) -> list[list[LineBox]]:
-    """수직 간격 기준으로 인접한 줄들을 문단으로 그룹핑합니다."""
-    if not line_boxes:
-        return []
-
-    sorted_lines = sorted(line_boxes, key=lambda lb: (lb.y, lb.x))
-    groups: list[list[LineBox]] = [[sorted_lines[0]]]
-
-    for line in sorted_lines[1:]:
-        prev = groups[-1][-1]
-        gap = line.y - (prev.y + prev.height)
-        # 간격이 이전 줄 높이의 0.8배 이하이면 같은 문단
-        threshold = prev.height * 0.8
-        if gap <= threshold:
-            groups[-1].append(line)
-        else:
-            groups.append([line])
-
-    return groups
-
-
-def _build_paragraph_translations(
-    groups: list[list[LineBox]],
-    translated_lines: list[str],
-) -> list[ParagraphTranslation]:
-    """문단 그룹과 줄 번역을 합쳐 ParagraphTranslation 리스트를 생성합니다."""
-    result: list[ParagraphTranslation] = []
-    line_idx = 0
-    for group in groups:
-        parts = []
-        for _ in group:
-            if line_idx < len(translated_lines):
-                t = translated_lines[line_idx].strip()
-                if t:
-                    parts.append(t)
-            line_idx += 1
-
-        para_text = " ".join(parts)
-        if not para_text.strip():
-            continue
-
-        min_x = min(lb.x for lb in group)
-        min_y = group[0].y
-        max_right = max(lb.x + lb.width for lb in group)
-        last_bottom = group[-1].y + group[-1].height
-        font_pts = sorted(lb.font_pt for lb in group)
-        median_font = font_pts[len(font_pts) // 2]
-
-        result.append(ParagraphTranslation(
-            translated=para_text,
-            x=min_x,
-            y=min_y,
-            width=max_right - min_x,
-            height=last_bottom - min_y,
-            font_pt=median_font,
-        ))
-    return result
-
-
-@dataclass
 class PipelineResult:
     """한 사이클의 파이프라인 실행 결과"""
     capture: CaptureResult                     # 캡처 결과
     ocr: OcrResult | None                      # OCR 결과 (Vision 모드에서는 None)
     translation: TranslationResult | None      # 번역 결과 (스킵 시 None)
     line_translations: list[LineTranslation] | None = None  # 줄 단위 번역 결과
-    paragraph_translations: list[ParagraphTranslation] | None = None  # 문단 단위 번역 결과
     skipped: bool = False                      # 변경 감지에서 스킵되었는지
     cached: bool = False                       # 캐시 히트인지
     region_id: int = 0                         # 다중 영역용 영역 ID
@@ -315,22 +244,19 @@ class Pipeline:
                 if cache_result.hit:
                     from mallangmollang.providers.base import TranslationResult as TR
                     cached_lines = cache_result.translated.split("\n")
+                    # 줄 수가 맞지 않으면 마지막 줄을 반복
                     while len(cached_lines) < len(line_boxes):
                         cached_lines.append(cached_lines[-1] if cached_lines else "")
                     line_trans = [
                         LineTranslation(line_box=lb, translated=t)
                         for lb, t in zip(line_boxes, cached_lines)
                     ]
-                    # 캐시에서도 문단 그룹핑 적용
-                    groups = _group_lines_into_paragraphs(line_boxes)
-                    para_trans = _build_paragraph_translations(groups, cached_lines)
                     cached_translation = TR(translated=cache_result.translated)
                     pipeline_result = PipelineResult(
                         capture=capture_result,
                         ocr=None,
                         translation=cached_translation,
                         line_translations=line_trans,
-                        paragraph_translations=para_trans,
                         cached=True,
                         region_id=region_id,
                     )
@@ -365,28 +291,41 @@ class Pipeline:
             except Exception as e:
                 print(f"[Pipeline] 로그 저장 실패: {e}")
 
-            # 문단 그룹핑 — 인접한 줄을 묶어 자연스러운 텍스트 흐름 생성
-            groups = _group_lines_into_paragraphs(line_boxes)
-            para_translations = _build_paragraph_translations(groups, translated_lines)
-            print(f"[Pipeline] {len(line_boxes)}줄 → {len(para_translations)}문단 그룹핑")
-
-            combined_translated = "\n".join(translated_lines)
-            if self.cache:
-                self.cache.store(combined_text, combined_translated)
-
-            # line_translations도 유지 (패널 모드 등에서 사용)
-            line_trans = [
-                LineTranslation(line_box=lb, translated=t)
-                for lb, t in zip(line_boxes, translated_lines)
-            ]
-            pipeline_result = PipelineResult(
-                capture=capture_result,
-                ocr=None,
-                translation=TranslationResult(translated=combined_translated),
-                line_translations=line_trans,
-                paragraph_translations=para_translations,
-                region_id=region_id,
+            # 줄 매핑 품질 검사 — 절반 이상이 비어있으면 블록 모드로 폴백
+            nonempty_count = sum(1 for t in translated_lines if t.strip())
+            use_block_fallback = (
+                len(translated_lines) > 1
+                and nonempty_count <= max(1, len(translated_lines) * 0.5)
             )
+
+            if use_block_fallback:
+                # 첫 번째 비어있지 않은 줄을 전체 번역으로 사용
+                combined_translated = " ".join(t for t in translated_lines if t.strip())
+                print(f"[Pipeline] 줄 매핑 실패 → 블록 모드 폴백 (비어있지 않은 줄: {nonempty_count}/{len(translated_lines)})")
+                if self.cache:
+                    self.cache.store(combined_text, combined_translated)
+                pipeline_result = PipelineResult(
+                    capture=capture_result,
+                    ocr=None,
+                    translation=TranslationResult(translated=combined_translated),
+                    line_translations=None,
+                    region_id=region_id,
+                )
+            else:
+                line_trans = [
+                    LineTranslation(line_box=lb, translated=t)
+                    for lb, t in zip(line_boxes, translated_lines)
+                ]
+                combined_translated = "\n".join(translated_lines)
+                if self.cache:
+                    self.cache.store(combined_text, combined_translated)
+                pipeline_result = PipelineResult(
+                    capture=capture_result,
+                    ocr=None,
+                    translation=TranslationResult(translated=combined_translated),
+                    line_translations=line_trans,
+                    region_id=region_id,
+                )
 
         # 6. 결과 콜백 (Display 연결용)
         if self._on_result:

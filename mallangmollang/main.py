@@ -39,7 +39,6 @@ class _Bridge(QObject):
     """
     translation_ready = pyqtSignal(str, object, int)  # (번역 텍스트, 캡처 영역, region_id)
     lines_ready = pyqtSignal(object, object, int)      # (줄 번역 리스트, 캡처 영역, region_id)
-    paragraphs_ready = pyqtSignal(object, object, object, int)  # (문단 리스트, 줄 리스트, 캡처 영역, region_id)
     status_changed = pyqtSignal(str)                   # "idle" | "translating" | "error"
     error_detail = pyqtSignal(str)                     # 에러 상세 메시지
 
@@ -81,7 +80,6 @@ class App:
         self._bridge = _Bridge()
         self._bridge.translation_ready.connect(self._on_translation_ready)
         self._bridge.lines_ready.connect(self._on_lines_ready)
-        self._bridge.paragraphs_ready.connect(self._on_paragraphs_ready)
         self._bridge.status_changed.connect(self._on_status_changed)
         self._bridge.error_detail.connect(self._on_error_detail)
 
@@ -159,13 +157,8 @@ class App:
             region_tuple = result.capture.region
             rid = result.region_id
 
-            # 문단 결과가 있으면 문단 모드로 전달 (오버레이용)
-            if result.paragraph_translations:
-                self._bridge.paragraphs_ready.emit(
-                    result.paragraph_translations, result.line_translations,
-                    region_tuple, rid,
-                )
-            elif result.line_translations:
+            # 줄 단위 번역 결과가 있으면 줄 모드로 전달
+            if result.line_translations:
                 self._bridge.lines_ready.emit(result.line_translations, region_tuple, rid)
             elif result.translation and result.translation.translated:
                 self._bridge.translation_ready.emit(
@@ -230,30 +223,6 @@ class App:
             ov.show_lines(lines, region=region)
             self._apply_snapshot_overlay_mode_for(ov)
         translated_text = "\n".join(lt.translated for lt in line_translations)
-        self._copy_to_clipboard(translated_text)
-
-    def _on_paragraphs_ready(self, paragraph_translations, line_translations, region, region_id: int):
-        """문단 단위 번역 결과를 표시합니다."""
-        if self.config.get("display.mode", "overlay") == "panel":
-            if line_translations:
-                original = "\n".join(lt.line_box.text for lt in line_translations)
-                translated = "\n".join(lt.translated for lt in line_translations)
-                self.side_panel.add_entry(translated, original)
-        else:
-            from mallangmollang.display.overlay import TranslatedParagraph
-            paras = [
-                TranslatedParagraph(
-                    text=pt.translated,
-                    x=pt.x, y=pt.y,
-                    width=pt.width, height=pt.height,
-                    font_pt=pt.font_pt,
-                )
-                for pt in paragraph_translations
-            ]
-            ov = self._get_overlay(region_id)
-            ov.show_paragraphs(paras, region=region)
-            self._apply_snapshot_overlay_mode_for(ov)
-        translated_text = " ".join(pt.translated for pt in paragraph_translations)
         self._copy_to_clipboard(translated_text)
 
     def _on_status_changed(self, status: str):
