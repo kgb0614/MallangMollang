@@ -442,6 +442,54 @@ class OcrEngine:
 
         return merged
 
+    def preview_preprocess(
+        self,
+        image: Image.Image,
+        lang: str = "auto",
+    ) -> tuple[Image.Image, Image.Image, Image.Image, str]:
+        """
+        OCR 전처리 과정을 시각화합니다.
+
+        Returns:
+            (원본 이미지, 전처리(이진화) 이미지, 바운딩 박스 오버레이 이미지, OCR 텍스트)
+        """
+        if lang == "auto":
+            lang = self.detect_script(image)
+
+        binary = self._preprocess(image)
+
+        # OCR 실행 — 단어별 바운딩 박스 + 신뢰도
+        data = pytesseract.image_to_data(
+            binary,
+            lang=lang,
+            output_type=pytesseract.Output.DICT,
+        )
+
+        # 바운딩 박스 오버레이: 원본 위에 박스 그리기
+        overlay = np.array(image).copy()
+        if len(overlay.shape) == 2:
+            overlay = cv2.cvtColor(overlay, cv2.COLOR_GRAY2RGB)
+
+        words: list[str] = []
+        for i in range(len(data["text"])):
+            text = data["text"][i].strip()
+            conf = float(data["conf"][i])
+            if conf < 0 or not text:
+                continue
+            words.append(text)
+
+            x, y = data["left"][i], data["top"][i]
+            w, h = data["width"][i], data["height"][i]
+            # 신뢰도 < 30 → 빨강, 나머지 → 초록
+            color = (0, 0, 255) if conf < 30 else (0, 200, 0)
+            cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
+
+        ocr_text = " ".join(words)
+        binary_pil = Image.fromarray(binary)
+        overlay_pil = Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
+
+        return image, binary_pil, overlay_pil, ocr_text
+
     def _preprocess(self, image: Image.Image) -> np.ndarray:
         """
         OCR 정확도를 높이기 위한 이미지 전처리를 수행합니다.

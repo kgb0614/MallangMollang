@@ -95,6 +95,7 @@ class App:
         self.tray.settings_requested.connect(self._on_settings)
         self.tray.region_requested.connect(self._on_region_select)
         self.tray.panel_requested.connect(self._show_panel)
+        self.tray.ocr_preview_requested.connect(self._on_ocr_preview)
         self.tray.debug_copy_requested.connect(self._copy_debug_info)
         self.tray.quit_requested.connect(self._on_quit)
 
@@ -367,6 +368,30 @@ class App:
     def _on_overlay_dismissed(self):
         """오버레이가 스스로 닫혔을 때 (클릭/자동 타이머) 영역 표시도 숨깁니다."""
         self.indicator.hide()
+
+    def _on_ocr_preview(self):
+        """현재 캡처 영역의 OCR 전처리 결과를 미리보기 창에 표시합니다."""
+        region = self.config.get("capture.region")
+        if not region:
+            self.toast.show("영역을 먼저 지정해주세요.", "warning")
+            return
+
+        from mallangmollang.core.capture import ScreenCapture
+        from mallangmollang.core.ocr import OcrEngine
+        from mallangmollang.ui.ocr_preview import OcrPreviewDialog
+
+        capture = ScreenCapture()
+        image = capture.capture_region(tuple(region))
+        if image is None:
+            self.toast.show("캡처 실패", "error")
+            return
+
+        ocr = OcrEngine()
+        lang = self.config.get("ocr.language", "auto")
+        original, preprocessed, bbox_overlay, ocr_text = ocr.preview_preprocess(image, lang)
+
+        dialog = OcrPreviewDialog(original, preprocessed, bbox_overlay, ocr_text)
+        dialog.exec()
 
     # ── 시그널 핸들러 ──
 
