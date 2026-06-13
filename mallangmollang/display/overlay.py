@@ -187,8 +187,8 @@ class OverlayWindow(QWidget):
         p = self.preset
         text_color = QColor(*p.text_color)
         bg = QColor(*p.bg_color)
-        # line 모드: 원문을 확실히 덮기 위해 배경을 불투명으로 강제
-        bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), 255) if bg.alpha() > 0 else None
+        # line 모드: 원문을 거의 덮되 약간의 투명도 유지
+        bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), 225) if bg.alpha() > 0 else None
         region_w = self.width()
         pad = 4
 
