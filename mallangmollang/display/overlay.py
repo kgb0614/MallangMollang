@@ -169,14 +169,41 @@ class OverlayWindow(QWidget):
         elif self._mode == "block" and self._text:
             self._paint_block()
 
-    def _paint_lines(self):
-        """MORT 스타일: 각 줄 위치에 불투명 배경으로 원문을 덮고 번역을 표시합니다.
-
-        - 폰트 크기를 원문과 동일하게 유지 (축소하지 않음)
-        - 줄 폭을 영역 전체 너비로 확장
-        - 번역이 길면 박스 높이를 자유롭게 늘림
-        - 완전 불투명 배경 + 이중 외곽선
+    def _group_lines(self) -> list[list["TranslatedLine"]]:
+        """인접한 줄들을 문단 단위로 묶습니다.
+        줄 사이 간격이 줄 높이 이하이면 같은 문단으로 판단합니다.
         """
+        lines = [l for l in self._lines if l.text.strip()]
+        if not lines:
+            return []
+
+        sorted_lines = sorted(lines, key=lambda l: l.y)
+        groups: list[list[TranslatedLine]] = [[sorted_lines[0]]]
+
+        for line in sorted_lines[1:]:
+            prev = groups[-1][-1]
+            prev_bottom = prev.y + prev.height
+            gap = line.y - prev_bottom
+            # 줄 간격이 줄 높이 이하면 같은 문단
+            if gap <= prev.height:
+                groups[-1].append(line)
+            else:
+                groups.append([line])
+
+        return groups
+
+    def _paint_lines(self):
+        """MORT 스타일: 인접 줄을 문단으로 묶어 자연스럽게 렌더링합니다.
+
+        - 가까운 줄끼리 문단으로 그룹핑
+        - 문단 영역 전체를 불투명 배경으로 덮음
+        - 번역 텍스트를 하나의 흐르는 문단으로 렌더링
+        - 폰트 크기 = 원문 크기 유지
+        """
+        groups = self._group_lines()
+        if not groups:
+            return
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
@@ -190,57 +217,57 @@ class OverlayWindow(QWidget):
                       | Qt.TextFlag.TextWordWrap)
 
         region_w = self.width()
-        pad = 4
+        pad = 5
 
-        for line in self._lines:
-            if not line.text.strip():
-                continue
+        for group in groups:
+            # 문단 영역 계산
+            group_y = group[0].y
+            group_bottom = max(l.y + l.height for l in group)
+            group_h = group_bottom - group_y
 
-            box_x = 0
-            box_w = region_w
-            avail_w = max(1, box_w - pad * 2)
+            # 번역 텍스트 합치기 (줄 사이에 공백)
+            merged_text = " ".join(l.text for l in group)
 
-            # 폰트: 원문 크기를 그대로 사용 (최소 10pt 보장)
-            font_size = max(10, line.font_pt)
-            font = QFont(p.font_family, font_size)
+            # 폰트: 그룹 내 평균 크기 사용 (최소 10pt)
+            avg_font = max(10, sum(l.font_pt for l in group) // len(group))
+            font = QFont(p.font_family, avg_font)
             font.setBold(p.font_bold)
             painter.setFont(font)
 
-            # 박스 높이: 원문 높이 또는 번역 텍스트에 필요한 높이 중 큰 값
+            # 텍스트에 필요한 실제 높이 계산
+            avail_w = max(1, region_w - pad * 2)
             text_bound = QFontMetrics(font).boundingRect(
-                QRect(0, 0, avail_w, 10000), text_flags, line.text,
+                QRect(0, 0, avail_w, 10000), text_flags, merged_text,
             )
-            box_h = max(line.height, text_bound.height() + pad * 2)
+            box_h = max(group_h, text_bound.height() + pad * 2)
 
-            # 불투명 배경 — 원문을 완전히 덮음
+            # 불투명 배경
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(bg_opaque))
-            painter.drawRect(box_x, line.y, box_w, box_h)
+            painter.drawRect(0, group_y, region_w, box_h)
 
             # 텍스트 영역
-            draw_rect = QRect(box_x + pad, line.y + pad, avail_w, box_h - pad * 2)
+            draw_rect = QRect(pad, group_y + pad, avail_w, box_h - pad * 2)
 
-            # 이중 외곽선 (바깥 두꺼운 선 + 안쪽 얇은 선)
+            # 이중 외곽선
             if p.outline:
                 outer_color = QColor(*p.outline_color)
-                # 바깥 외곽선 (두꺼움)
                 painter.setPen(QPen(outer_color, 4))
                 for dx, dy in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
                     painter.drawText(
                         draw_rect.adjusted(dx, dy, dx, dy),
-                        text_flags, line.text,
+                        text_flags, merged_text,
                     )
-                # 안쪽 외곽선 (얇음)
                 painter.setPen(QPen(outer_color, 2))
                 for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                     painter.drawText(
                         draw_rect.adjusted(dx, dy, dx, dy),
-                        text_flags, line.text,
+                        text_flags, merged_text,
                     )
 
             # 본문 텍스트
             painter.setPen(QPen(text_color))
-            painter.drawText(draw_rect, text_flags, line.text)
+            painter.drawText(draw_rect, text_flags, merged_text)
 
         painter.end()
 
