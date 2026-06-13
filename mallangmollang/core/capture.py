@@ -1,13 +1,14 @@
 """
 화면 캡처 모듈
-영역 지정 모드와 커서 추적 모드를 지원합니다.
+영역 지정 모드, 커서 추적 모드, 윈도우 지정 모드를 지원합니다.
 """
 
+import sys
 import time
 from dataclasses import dataclass
 
 import mss
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 @dataclass
@@ -94,6 +95,62 @@ class ScreenCapture:
         """
         with mss.mss() as sct:
             return sct.monitors
+
+    def capture_window(
+        self,
+        window_title: str,
+        relative_rect: tuple[int, int, int, int],
+    ) -> CaptureResult | None:
+        """
+        특정 윈도우 기준 상대 좌표로 캡처합니다 (Windows 전용).
+
+        Args:
+            window_title: 대상 윈도우 타이틀
+            relative_rect: 윈도우 내 상대 좌표 (rx, ry, w, h)
+
+        Returns:
+            CaptureResult 또는 None (윈도우를 찾을 수 없는 경우)
+        """
+        if sys.platform != "win32":
+            return None
+        try:
+            import win32gui
+            hwnd = win32gui.FindWindow(None, window_title)
+            if not hwnd or not win32gui.IsWindowVisible(hwnd):
+                return None
+            if win32gui.IsIconic(hwnd):
+                return None
+            wl, wt, wr, wb = win32gui.GetWindowRect(hwnd)
+            rx, ry, rw, rh = relative_rect
+            abs_x = wl + rx
+            abs_y = wt + ry
+            return self.capture_region((abs_x, abs_y, rw, rh))
+        except Exception:
+            return None
+
+    @staticmethod
+    def mask_exclude_zones(
+        image: Image.Image,
+        exclude_zones: list[list[int]],
+    ) -> Image.Image:
+        """
+        제외 영역을 검은색으로 마스킹합니다 (OCR에서 무시하도록).
+
+        Args:
+            image: 캡처 이미지
+            exclude_zones: 상대 좌표 [[rx, ry, rw, rh], ...]
+
+        Returns:
+            마스킹된 이미지 (원본 변경 없이 복사)
+        """
+        if not exclude_zones:
+            return image
+        masked = image.copy()
+        draw = ImageDraw.Draw(masked)
+        for zone in exclude_zones:
+            rx, ry, rw, rh = zone
+            draw.rectangle([rx, ry, rx + rw, ry + rh], fill=(0, 0, 0))
+        return masked
 
     def close(self):
         """하위 호환용 — 더 이상 핸들을 보관하지 않으므로 no-op."""

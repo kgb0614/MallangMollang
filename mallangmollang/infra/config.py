@@ -59,6 +59,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "region": None,           # 하위호환용 단일 영역 (regions[0]과 동기화)
         "regions": [],            # 다중 영역 [{"id": 1, "name": "...", "rect": [...], "enabled": True}, ...]
         "cursor_radius": 200,     # 커서 추적 모드에서 캡처 반경 (픽셀)
+        "target_mode": "screen",  # "screen" (화면 좌표) | "window" (윈도우 기준)
+        "window_title": "",       # 윈도우 캡처 대상 창 타이틀
     },
 
     # 번역 설정

@@ -142,6 +142,7 @@ class Pipeline:
         self,
         region: tuple[int, int, int, int] | None = None,
         region_id: int = 0,
+        exclude_zones: list[list[int]] | None = None,
     ) -> PipelineResult:
         """
         한 번의 캡처-번역 사이클을 실행합니다.
@@ -149,6 +150,7 @@ class Pipeline:
         Args:
             region: 캡처 영역 (None이면 Config에서 가져옴)
             region_id: 다중 영역용 영역 ID
+            exclude_zones: OCR 제외 영역 [[rx, ry, rw, rh], ...]
 
         Returns:
             PipelineResult
@@ -157,7 +159,27 @@ class Pipeline:
         if region is None:
             region = tuple(self.config.get("capture.region", [0, 0, 800, 600]))
 
-        capture_result = self.capture.capture_region(region)
+        target_mode = self.config.get("capture.target_mode", "screen")
+        if target_mode == "window":
+            title = self.config.get("capture.window_title", "")
+            capture_result = self.capture.capture_window(title, region)
+            if capture_result is None:
+                return PipelineResult(
+                    capture=self.capture.capture_region(region),
+                    ocr=None,
+                    translation=None,
+                    skipped=True,
+                    region_id=region_id,
+                )
+        else:
+            capture_result = self.capture.capture_region(region)
+
+        # 제외 영역 마스킹
+        if exclude_zones:
+            from mallangmollang.core.capture import ScreenCapture
+            capture_result.image = ScreenCapture.mask_exclude_zones(
+                capture_result.image, exclude_zones,
+            )
 
         # 2. 변경 감지 — 변경 없으면 이후 파이프라인 전체 스킵 (PRD F2-1)
         if self.detector:
@@ -341,6 +363,7 @@ class Pipeline:
                         await self.run_once(
                             region=tuple(r["rect"]),
                             region_id=r["id"],
+                            exclude_zones=r.get("exclude_zones"),
                         )
                 else:
                     await self.run_once(region)
