@@ -37,8 +37,9 @@ class _Bridge(QObject):
     asyncio 스레드 → Qt 메인 스레드로 번역 결과를 안전하게 전달하는 브리지.
     Qt 위젯은 메인 스레드에서만 접근해야 하므로, 시그널을 통해 전달합니다.
     """
-    translation_ready = pyqtSignal(str, object, int)  # (번역 텍스트, 캡처 영역, region_id)
-    lines_ready = pyqtSignal(object, object, int)      # (줄 번역 리스트, 캡처 영역, region_id)
+    # (번역 텍스트, 캡처 영역, region_id, 캡처 이미지 or None)
+    translation_ready = pyqtSignal(str, object, int, object)
+    lines_ready = pyqtSignal(object, object, int, object)
     status_changed = pyqtSignal(str)                   # "idle" | "translating" | "error"
     error_detail = pyqtSignal(str)                     # 에러 상세 메시지
 
@@ -156,13 +157,14 @@ class App:
         def on_result(result):
             region_tuple = result.capture.region
             rid = result.region_id
+            img = result.capture.image
 
             # 줄 단위 번역 결과가 있으면 줄 모드로 전달
             if result.line_translations:
-                self._bridge.lines_ready.emit(result.line_translations, region_tuple, rid)
+                self._bridge.lines_ready.emit(result.line_translations, region_tuple, rid, img)
             elif result.translation and result.translation.translated:
                 self._bridge.translation_ready.emit(
-                    result.translation.translated, region_tuple, rid,
+                    result.translation.translated, region_tuple, rid, img,
                 )
 
         pipeline.on_result(on_result)
@@ -190,17 +192,18 @@ class App:
             self._indicators[region_id] = AreaIndicatorWindow()
         return self._indicators[region_id]
 
-    def _on_translation_ready(self, text: str, region, region_id: int):
+    def _on_translation_ready(self, text: str, region, region_id: int, image=None):
         """번역 결과를 표시 모드에 따라 오버레이 또는 사이드 패널에 보냅니다."""
         self.side_panel.add_entry(text)
         if self.config.get("display.mode", "overlay") != "panel":
             self._hide_indicator_for(region_id)
             ov = self._get_overlay(region_id)
+            self._apply_auto_colors(ov, image)
             ov.show_translation(text, region=region)
             self._apply_snapshot_overlay_mode_for(ov)
         self._copy_to_clipboard(text)
 
-    def _on_lines_ready(self, line_translations, region, region_id: int):
+    def _on_lines_ready(self, line_translations, region, region_id: int, image=None):
         """줄 단위 번역 결과를 표시 모드에 따라 분기합니다."""
         original = "\n".join(lt.line_box.text for lt in line_translations)
         translated = "\n".join(lt.translated for lt in line_translations)
@@ -220,6 +223,7 @@ class App:
                 for lt in line_translations
             ]
             ov = self._get_overlay(region_id)
+            self._apply_auto_colors(ov, image)
             ov.show_lines(lines, region=region)
             self._apply_snapshot_overlay_mode_for(ov)
         self._copy_to_clipboard(translated)
@@ -452,6 +456,15 @@ class App:
         """auto_clipboard 설정이 활성화되어 있으면 번역 결과를 클립보드에 복사합니다."""
         if self.config.get("translation.auto_clipboard", False) and text.strip():
             QApplication.clipboard().setText(text)
+
+    def _apply_auto_colors(self, ov: OverlayWindow, image=None):
+        """자동 색상 매핑이 활성화되어 있으면 캡처 이미지를 분석하여 오버레이 색상을 설정합니다."""
+        if not self.config.get("display.auto_color", False) or image is None:
+            ov.set_auto_colors(None, None)
+            return
+        from mallangmollang.display.auto_color import analyze_colors
+        text_color, outline_color = analyze_colors(image)
+        ov.set_auto_colors(text_color, outline_color)
 
     def _apply_snapshot_overlay_mode_for(self, ov: OverlayWindow):
         """스냅샷 모드일 때 오버레이에 클릭 닫기 + 자동 타이머를 설정합니다."""

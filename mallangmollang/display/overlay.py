@@ -57,6 +57,8 @@ class OverlayWindow(QWidget):
         self._current_region: tuple[int, int, int, int] | None = None
         self._mode = "line"  # "line" | "block"
         self._snapshot_mode = False
+        self._auto_text_color: tuple[int, int, int, int] | None = None
+        self._auto_outline_color: tuple[int, int, int, int] | None = None
 
         # 스냅샷 자동 정리 타이머
         self._dismiss_timer = QTimer(self)
@@ -163,6 +165,15 @@ class OverlayWindow(QWidget):
         self.preset = preset
         self.update()
 
+    def set_auto_colors(
+        self,
+        text_color: tuple[int, int, int, int] | None,
+        outline_color: tuple[int, int, int, int] | None,
+    ):
+        """자동 색상 매핑 결과를 설정합니다. None이면 프리셋 색상을 사용합니다."""
+        self._auto_text_color = text_color
+        self._auto_outline_color = outline_color
+
     def update_position(self, x: int, y: int):
         self.move(x, y)
 
@@ -185,7 +196,8 @@ class OverlayWindow(QWidget):
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
         p = self.preset
-        text_color = QColor(*p.text_color)
+        tc = self._auto_text_color or p.text_color
+        text_color = QColor(*tc)
         bg = QColor(*p.bg_color)
         # line 모드: 원문을 거의 덮되 약간의 투명도 유지
         bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), 225) if bg.alpha() > 0 else None
@@ -235,7 +247,8 @@ class OverlayWindow(QWidget):
                 path.addText(QPointF(draw_x, draw_y), font, segment)
 
                 if p.outline:
-                    outline_color = QColor(*p.outline_color)
+                    oc = self._auto_outline_color or p.outline_color
+                    outline_color = QColor(*oc)
 
                     stroker_outer = QPainterPathStroker()
                     stroker_outer.setWidth(outer_w)
@@ -291,7 +304,8 @@ class OverlayWindow(QWidget):
 
         p = self.preset
         bg = QColor(*p.bg_color)
-        text_color = QColor(*p.text_color)
+        tc = self._auto_text_color or p.text_color
+        text_color = QColor(*tc)
         font = QFont(p.font_family, p.font_size)
         font.setBold(p.font_bold)
         painter.setFont(font)

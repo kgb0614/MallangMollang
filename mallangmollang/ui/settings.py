@@ -531,6 +531,9 @@ class SettingsWindow(QDialog):
         self._active_preset.addItems(["기본", "어두운 게임용", "밝은 배경용"])
         form.addRow("오버레이 프리셋:", self._active_preset)
 
+        self._auto_color = QCheckBox("배경에 맞게 텍스트 색상 자동 조절")
+        form.addRow("자동 색상:", self._auto_color)
+
         layout.addWidget(group)
         layout.addStretch()
         return widget
@@ -649,6 +652,8 @@ class SettingsWindow(QDialog):
         if pidx >= 0:
             self._active_preset.setCurrentIndex(pidx)
 
+        self._auto_color.setChecked(c.get("display.auto_color", False))
+
         # 단축키 탭
         self._hotkey_toggle.setText(c.get("hotkeys.toggle_translation", "<ctrl>+<shift>+t"))
         self._hotkey_region.setText(c.get("hotkeys.select_region", "<ctrl>+<shift>+r"))
@@ -704,6 +709,7 @@ class SettingsWindow(QDialog):
         # 표시
         c.set("display.mode", self._display_mode.currentText())
         c.set("display.active_preset", self._active_preset.currentText())
+        c.set("display.auto_color", self._auto_color.isChecked())
 
         # 단축키
         toggle_key = self._hotkey_toggle.text().strip() or "<ctrl>+<shift>+t"
