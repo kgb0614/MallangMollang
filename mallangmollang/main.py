@@ -665,9 +665,6 @@ class App:
             )
             self.toast.show(f"영역 추가: {new_region['name']} ({w}×{h})", "success")
         self.panel.show()
-        mode = self.config.get("translation.run_mode", "realtime")
-        if mode == "realtime":
-            self._start_translation()
 
     def _on_region_cancelled(self):
         """영역 선택이 취소되면 패널을 복원합니다."""
