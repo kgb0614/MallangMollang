@@ -176,8 +176,9 @@ class OverlayWindow(QWidget):
         """각 줄의 번역을 원문 위치에 배치합니다 (MORT 스타일).
 
         - QPainterPath 기반 이중 외곽선으로 고품질 텍스트 렌더링
+        - 번역이 길어 줄바꿈되면 이후 줄들을 아래로 밀어냄 (겹침 방지)
+        - 외곽선 두께를 폰트 크기에 비례하도록 조정
         - 프리셋 bg_color 알파값에 따라 배경 표시 여부 결정
-          (알파 0 → 배경 없음, 알파 > 0 → 해당 투명도로 배경 표시)
         """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -189,6 +190,9 @@ class OverlayWindow(QWidget):
         use_bg = bg.alpha() > 0
         region_w = self.width()
         pad = 4
+
+        # 누적 오프셋: 이전 줄의 번역이 원문보다 길면 아래 줄들을 밀어냄
+        y_offset = 0
 
         for line in self._lines:
             if not line.text.strip():
@@ -211,14 +215,19 @@ class OverlayWindow(QWidget):
             total_text_h = line_spacing * len(wrapped)
             box_h = max(line.height, total_text_h + pad)
 
-            # 배경 (프리셋 bg_color 알파 > 0 일 때만)
+            actual_y = line.y + y_offset
+
             if use_bg:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(bg))
-                painter.drawRect(box_x, line.y, box_w, box_h)
+                painter.drawRect(box_x, actual_y, box_w, box_h)
 
             draw_x = box_x + pad
-            draw_y = line.y + fm.ascent() + (pad // 2)
+            draw_y = actual_y + fm.ascent() + (pad // 2)
+
+            # 외곽선 두께를 폰트 크기에 비례 (MORT: 5/2px 기준 ~16pt)
+            outer_w = max(2.0, font_size * 0.3)
+            inner_w = max(1.0, font_size * 0.12)
 
             for segment in wrapped:
                 path = QPainterPath()
@@ -228,14 +237,14 @@ class OverlayWindow(QWidget):
                     outline_color = QColor(*p.outline_color)
 
                     stroker_outer = QPainterPathStroker()
-                    stroker_outer.setWidth(5)
+                    stroker_outer.setWidth(outer_w)
                     stroker_outer.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                     painter.setPen(Qt.PenStyle.NoPen)
                     painter.setBrush(QBrush(outline_color))
                     painter.drawPath(stroker_outer.createStroke(path))
 
                     stroker_inner = QPainterPathStroker()
-                    stroker_inner.setWidth(2)
+                    stroker_inner.setWidth(inner_w)
                     stroker_inner.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                     inner_color = QColor(outline_color)
                     inner_color.setAlpha(min(255, outline_color.alpha() + 40))
@@ -246,6 +255,11 @@ class OverlayWindow(QWidget):
                 painter.fillPath(path, QBrush(text_color))
 
                 draw_y += line_spacing
+
+            # 번역이 원문 줄 높이보다 길면 차이만큼 이후 줄들을 밀어냄
+            overflow = box_h - line.height
+            if overflow > 0:
+                y_offset += overflow
 
         painter.end()
 
