@@ -37,10 +37,10 @@ class _Bridge(QObject):
     asyncio 스레드 → Qt 메인 스레드로 번역 결과를 안전하게 전달하는 브리지.
     Qt 위젯은 메인 스레드에서만 접근해야 하므로, 시그널을 통해 전달합니다.
     """
-    translation_ready = pyqtSignal(str, object)   # (번역 텍스트, 캡처 영역)
-    lines_ready = pyqtSignal(object, object)       # (줄 번역 리스트, 캡처 영역)
-    status_changed = pyqtSignal(str)               # "idle" | "translating" | "error"
-    error_detail = pyqtSignal(str)                 # 에러 상세 메시지
+    translation_ready = pyqtSignal(str, object, int)  # (번역 텍스트, 캡처 영역, region_id)
+    lines_ready = pyqtSignal(object, object, int)      # (줄 번역 리스트, 캡처 영역, region_id)
+    status_changed = pyqtSignal(str)                   # "idle" | "translating" | "error"
+    error_detail = pyqtSignal(str)                     # 에러 상세 메시지
 
 
 class App:
@@ -59,7 +59,10 @@ class App:
         )
         self.cache.load(_CACHE_PATH)
 
-        # 컴포넌트 초기화
+        # 컴포넌트 초기화 — 다중 영역용 딕셔너리 (region_id → 위젯)
+        self._overlays: dict[int, OverlayWindow] = {}
+        self._indicators: dict[int, AreaIndicatorWindow] = {}
+        # 하위호환: 단일 영역용 기본 오버레이/인디케이터
         self.overlay = OverlayWindow(
             preset=get_preset_by_name(self.config.get("display.active_preset", "기본"))
         )
@@ -140,15 +143,15 @@ class App:
         pipeline = Pipeline.from_config(self.config, cache=self.cache)
 
         def on_result(result):
-            region = self.config.get("capture.region")
-            region_tuple = tuple(region) if region else None
+            region_tuple = result.capture.region
+            rid = result.region_id
 
             # 줄 단위 번역 결과가 있으면 줄 모드로 전달
             if result.line_translations:
-                self._bridge.lines_ready.emit(result.line_translations, region_tuple)
+                self._bridge.lines_ready.emit(result.line_translations, region_tuple, rid)
             elif result.translation and result.translation.translated:
                 self._bridge.translation_ready.emit(
-                    result.translation.translated, region_tuple,
+                    result.translation.translated, region_tuple, rid,
                 )
 
         pipeline.on_result(on_result)
@@ -156,15 +159,36 @@ class App:
         pipeline.on_error(lambda msg: self._bridge.error_detail.emit(msg))
         return pipeline
 
-    def _on_translation_ready(self, text: str, region):
+    def _get_overlay(self, region_id: int) -> OverlayWindow:
+        """영역 ID에 대응하는 오버레이 위젯을 반환합니다 (없으면 생성)."""
+        if region_id == 0:
+            return self.overlay
+        if region_id not in self._overlays:
+            ov = OverlayWindow(
+                preset=get_preset_by_name(self.config.get("display.active_preset", "기본"))
+            )
+            ov.dismissed.connect(lambda rid=region_id: self._on_overlay_dismissed_region(rid))
+            self._overlays[region_id] = ov
+        return self._overlays[region_id]
+
+    def _get_indicator(self, region_id: int) -> AreaIndicatorWindow:
+        """영역 ID에 대응하는 인디케이터를 반환합니다 (없으면 생성)."""
+        if region_id == 0:
+            return self.indicator
+        if region_id not in self._indicators:
+            self._indicators[region_id] = AreaIndicatorWindow()
+        return self._indicators[region_id]
+
+    def _on_translation_ready(self, text: str, region, region_id: int):
         """번역 결과를 표시 모드에 따라 오버레이 또는 사이드 패널에 보냅니다."""
         if self.config.get("display.mode", "overlay") == "panel":
             self.side_panel.add_entry(text)
         else:
-            self.overlay.show_translation(text, region=region)
-            self._apply_snapshot_overlay_mode()
+            ov = self._get_overlay(region_id)
+            ov.show_translation(text, region=region)
+            self._apply_snapshot_overlay_mode_for(ov)
 
-    def _on_lines_ready(self, line_translations, region):
+    def _on_lines_ready(self, line_translations, region, region_id: int):
         """줄 단위 번역 결과를 표시 모드에 따라 분기합니다."""
         if self.config.get("display.mode", "overlay") == "panel":
             original = "\n".join(lt.line_box.text for lt in line_translations)
@@ -183,8 +207,9 @@ class App:
                 )
                 for lt in line_translations
             ]
-            self.overlay.show_lines(lines, region=region)
-            self._apply_snapshot_overlay_mode()
+            ov = self._get_overlay(region_id)
+            ov.show_lines(lines, region=region)
+            self._apply_snapshot_overlay_mode_for(ov)
 
     def _on_status_changed(self, status: str):
         """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""
@@ -221,9 +246,10 @@ class App:
         if self._running:
             return
 
-        # 영역이 지정되지 않았으면 먼저 영역 선택
+        # 다중 영역 또는 단일 영역 확인
+        regions = self.config.get_regions()
         region = self.config.get("capture.region")
-        if not region:
+        if not regions and not region:
             self.toast.show("번역 영역을 먼저 지정해주세요.", "warning")
             self._on_region_select()
             return
@@ -238,11 +264,19 @@ class App:
         self.tray.set_active(True)
         self.panel.set_active(True)
 
-        # 영역 표시 창 갱신
-        rx, ry, rw, rh = region
-        self.indicator.set_region(rx, ry, rw, rh)
-        self.indicator.set_status("idle")
-        self.indicator.show()
+        # 영역별 인디케이터 표시
+        if regions:
+            for r in regions:
+                ind = self._get_indicator(r["id"])
+                rx, ry, rw, rh = r["rect"]
+                ind.set_region(rx, ry, rw, rh)
+                ind.set_status("idle")
+                ind.show()
+        elif region:
+            rx, ry, rw, rh = region
+            self.indicator.set_region(rx, ry, rw, rh)
+            self.indicator.set_status("idle")
+            self.indicator.show()
 
         # 패널 모드이면 사이드 패널 표시
         if self.config.get("display.mode", "overlay") == "panel":
@@ -261,10 +295,16 @@ class App:
         """asyncio 루프를 스레드에서 실행합니다."""
         asyncio.set_event_loop(self._loop)
         try:
-            region = tuple(self.config.get("capture.region"))
-            self._loop.run_until_complete(
-                self.pipeline.run_loop(region=region)
-            )
+            regions = self.config.get_regions()
+            if regions:
+                self._loop.run_until_complete(
+                    self.pipeline.run_loop(regions=regions)
+                )
+            else:
+                region = tuple(self.config.get("capture.region"))
+                self._loop.run_until_complete(
+                    self.pipeline.run_loop(region=region)
+                )
         except Exception as e:
             print(f"[App] 번역 루프 오류: {e}")
             self._bridge.error_detail.emit(str(e))
@@ -284,6 +324,10 @@ class App:
         self.panel.set_active(False)
         self.overlay.hide_translation()
         self.indicator.hide()
+        for ov in self._overlays.values():
+            ov.hide_translation()
+        for ind in self._indicators.values():
+            ind.hide()
         self.toast.show("번역을 중지합니다.", "info")
 
     def _apply_profile(self):
@@ -311,8 +355,9 @@ class App:
         if self._snapshot_running:
             return
 
+        regions = self.config.get_regions()
         region = self.config.get("capture.region")
-        if not region:
+        if not regions and not region:
             self.toast.show("번역 영역을 먼저 지정해주세요.", "warning")
             self._on_region_select()
             return
@@ -324,9 +369,17 @@ class App:
 
         self._snapshot_running = True
 
-        rx, ry, rw, rh = region
-        self.indicator.set_region(rx, ry, rw, rh)
-        self.indicator.show()
+        # 영역별 인디케이터 표시
+        if regions:
+            for r in regions:
+                ind = self._get_indicator(r["id"])
+                rx, ry, rw, rh = r["rect"]
+                ind.set_region(rx, ry, rw, rh)
+                ind.show()
+        elif region:
+            rx, ry, rw, rh = region
+            self.indicator.set_region(rx, ry, rw, rh)
+            self.indicator.show()
 
         self.panel.set_status("● 번역 중...", "rgba(255,210,50,220)")
 
@@ -337,9 +390,18 @@ class App:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(
-                    self.pipeline.run_once(region=tuple(region))
-                )
+                if regions:
+                    for r in regions:
+                        loop.run_until_complete(
+                            self.pipeline.run_once(
+                                region=tuple(r["rect"]),
+                                region_id=r["id"],
+                            )
+                        )
+                else:
+                    loop.run_until_complete(
+                        self.pipeline.run_once(region=tuple(region))
+                    )
                 self._bridge.status_changed.emit("idle")
             except Exception as e:
                 print(f"[App] 스냅샷 오류: {e}")
@@ -351,23 +413,32 @@ class App:
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _apply_snapshot_overlay_mode(self):
+    def _apply_snapshot_overlay_mode_for(self, ov: OverlayWindow):
         """스냅샷 모드일 때 오버레이에 클릭 닫기 + 자동 타이머를 설정합니다."""
         mode = self.config.get("translation.run_mode", "realtime")
         if mode == "snapshot":
             auto_ms = self.config.get("display.snapshot_auto_dismiss_ms", 0)
-            self.overlay.set_snapshot_mode(True, auto_ms)
+            ov.set_snapshot_mode(True, auto_ms)
         else:
-            self.overlay.set_snapshot_mode(False)
+            ov.set_snapshot_mode(False)
 
     def _on_dismiss(self):
-        """ESC 키로 오버레이와 영역 표시를 숨깁니다."""
+        """ESC 키로 모든 오버레이와 영역 표시를 숨깁니다."""
         self.overlay.hide_translation()
         self.indicator.hide()
+        for ov in self._overlays.values():
+            ov.hide_translation()
+        for ind in self._indicators.values():
+            ind.hide()
 
     def _on_overlay_dismissed(self):
-        """오버레이가 스스로 닫혔을 때 (클릭/자동 타이머) 영역 표시도 숨깁니다."""
+        """기본 오버레이가 닫혔을 때 기본 영역 표시도 숨깁니다."""
         self.indicator.hide()
+
+    def _on_overlay_dismissed_region(self, region_id: int):
+        """특정 영역의 오버레이가 닫혔을 때 해당 인디케이터도 숨깁니다."""
+        if region_id in self._indicators:
+            self._indicators[region_id].hide()
 
     def _on_ocr_preview(self):
         """현재 캡처 영역의 OCR 전처리 결과를 미리보기 창에 표시합니다."""
@@ -440,7 +511,10 @@ class App:
     def _on_settings_saved(self):
         """설정 저장 후 오버레이 프리셋, 패널 모드, 단축키, 번역 프로필을 갱신합니다."""
         preset_name = self.config.get("display.active_preset", "기본")
-        self.overlay.set_preset(get_preset_by_name(preset_name))
+        preset = get_preset_by_name(preset_name)
+        self.overlay.set_preset(preset)
+        for ov in self._overlays.values():
+            ov.set_preset(preset)
         mode = self.config.get("translation.run_mode", "realtime")
         self.panel.set_mode(mode)
         self.hotkeys.reload()
@@ -462,12 +536,16 @@ class App:
         self.region_selector.start()
 
     def _on_region_selected(self, region: tuple):
-        """영역 선택 완료 후 Config를 저장합니다."""
+        """영역 선택 완료 후 Config에 추가합니다."""
         x, y, w, h = region
-        self.config.set("capture.region", [x, y, w, h])
-        self.toast.show(f"영역 설정 완료: {w}×{h}", "success")
-        if self._running:
-            self.indicator.set_region(x, y, w, h)
+        regions = self.config.get_all_regions()
+        if len(regions) >= 5:
+            self.toast.show("영역은 최대 5개까지 지정할 수 있습니다.", "warning")
+            self.panel.show()
+            return
+        new_region = self.config.add_region([x, y, w, h])
+        if new_region:
+            self.toast.show(f"영역 추가: {new_region['name']} ({w}×{h})", "success")
         self.panel.show()
         mode = self.config.get("translation.run_mode", "realtime")
         if mode == "realtime":

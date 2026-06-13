@@ -44,6 +44,8 @@ class ChangeDetector:
         """
         self.threshold = threshold
         self._prev_hash: imagehash.ImageHash | None = None
+        # 다중 영역용 — 영역 ID별 이전 해시 저장
+        self._region_hashes: dict[int, imagehash.ImageHash] = {}
 
     def detect(self, capture: CaptureResult) -> DetectorResult:
         """
@@ -74,6 +76,26 @@ class ChangeDetector:
 
         return DetectorResult(changed=changed, hash_diff=diff, current_hash=current_hash_str)
 
+    def has_changed(self, image: Image, region_id: int) -> bool:
+        """특정 영역의 이미지가 변경되었는지 확인합니다 (다중 영역용)."""
+        current_hash = imagehash.phash(image)
+        prev = self._region_hashes.get(region_id)
+
+        if prev is None:
+            self._region_hashes[region_id] = current_hash
+            return True
+
+        diff = int(current_hash - prev)
+        if diff > self.threshold:
+            self._region_hashes[region_id] = current_hash
+            return True
+        return False
+
     def reset(self):
         """이전 해시를 초기화합니다. 영역 변경 시 호출하세요."""
         self._prev_hash = None
+        self._region_hashes.clear()
+
+    def reset_region(self, region_id: int):
+        """특정 영역의 해시를 초기화합니다."""
+        self._region_hashes.pop(region_id, None)

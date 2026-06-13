@@ -56,7 +56,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "capture": {
         "mode": "region",         # 캡처 모드: "region" | "cursor"
         "interval_ms": 1500,      # 캡처 주기 (밀리초)
-        "region": None,           # 지정된 영역 좌표 [x, y, w, h] 또는 None
+        "region": None,           # 하위호환용 단일 영역 (regions[0]과 동기화)
+        "regions": [],            # 다중 영역 [{"id": 1, "name": "...", "rect": [...], "enabled": True}, ...]
         "cursor_radius": 200,     # 커서 추적 모드에서 캡처 반경 (픽셀)
     },
 
@@ -137,6 +138,9 @@ class Config:
             self.save()
             return
 
+        # 기존 단일 region → regions 마이그레이션
+        self._migrate_region_to_regions()
+
         # 디스크에서 읽은 암호화된 API 키를 복호화 (메모리에는 평문 유지)
         self._decrypt_secrets()
 
@@ -212,6 +216,62 @@ class Config:
                 node[k] = {}
             node = node[k]
         node[keys[-1]] = value
+
+    def _migrate_region_to_regions(self):
+        """기존 capture.region만 있는 config를 capture.regions로 자동 변환합니다."""
+        regions = self.get("capture.regions", [])
+        region = self.get("capture.region")
+        if region and not regions:
+            self._set_no_save("capture.regions", [
+                {"id": 1, "name": "영역 1", "rect": region, "enabled": True},
+            ])
+
+    def get_regions(self) -> list[dict]:
+        """활성화된 캡처 영역 목록을 반환합니다."""
+        return [r for r in self.get("capture.regions", []) if r.get("enabled", True)]
+
+    def get_all_regions(self) -> list[dict]:
+        """모든 캡처 영역을 반환합니다 (비활성 포함)."""
+        return self.get("capture.regions", [])
+
+    def add_region(self, rect: list[int], name: str | None = None) -> dict:
+        """새 영역을 추가합니다. 최대 5개 제한."""
+        regions = self.get("capture.regions", [])
+        if len(regions) >= 5:
+            return {}
+        next_id = max((r["id"] for r in regions), default=0) + 1
+        if name is None:
+            name = f"영역 {next_id}"
+        new_region = {"id": next_id, "name": name, "rect": rect, "enabled": True}
+        regions.append(new_region)
+        self.set("capture.regions", regions)
+        # 하위호환: 첫 번째 영역을 capture.region에도 동기화
+        self._sync_region_compat()
+        return new_region
+
+    def remove_region(self, region_id: int):
+        """영역을 삭제합니다."""
+        regions = [r for r in self.get("capture.regions", []) if r["id"] != region_id]
+        self.set("capture.regions", regions)
+        self._sync_region_compat()
+
+    def update_region(self, region_id: int, **kwargs):
+        """영역 속성을 수정합니다 (rect, name, enabled)."""
+        regions = self.get("capture.regions", [])
+        for r in regions:
+            if r["id"] == region_id:
+                r.update(kwargs)
+                break
+        self.set("capture.regions", regions)
+        self._sync_region_compat()
+
+    def _sync_region_compat(self):
+        """regions[0]의 rect를 capture.region에 동기화합니다 (하위호환)."""
+        regions = self.get("capture.regions", [])
+        if regions:
+            self._set_no_save("capture.region", regions[0]["rect"])
+        else:
+            self._set_no_save("capture.region", None)
 
     def get_provider_config(self, provider_name: str) -> dict:
         """특정 프로바이더의 설정 딕셔너리를 반환합니다."""

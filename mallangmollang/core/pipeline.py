@@ -39,6 +39,7 @@ class PipelineResult:
     line_translations: list[LineTranslation] | None = None  # 줄 단위 번역 결과
     skipped: bool = False                      # 변경 감지에서 스킵되었는지
     cached: bool = False                       # 캐시 히트인지
+    region_id: int = 0                         # 다중 영역용 영역 ID
 
 
 # 파이프라인 이벤트 콜백 타입
@@ -137,12 +138,17 @@ class Pipeline:
         """에러 상세 메시지를 받을 콜백을 등록합니다."""
         self._on_error = callback
 
-    async def run_once(self, region: tuple[int, int, int, int] | None = None) -> PipelineResult:
+    async def run_once(
+        self,
+        region: tuple[int, int, int, int] | None = None,
+        region_id: int = 0,
+    ) -> PipelineResult:
         """
         한 번의 캡처-번역 사이클을 실행합니다.
 
         Args:
             region: 캡처 영역 (None이면 Config에서 가져옴)
+            region_id: 다중 영역용 영역 ID
 
         Returns:
             PipelineResult
@@ -155,13 +161,18 @@ class Pipeline:
 
         # 2. 변경 감지 — 변경 없으면 이후 파이프라인 전체 스킵 (PRD F2-1)
         if self.detector:
-            det = self.detector.detect(capture_result)
-            if not det.changed:
+            if region_id > 0:
+                changed = self.detector.has_changed(capture_result.image, region_id)
+            else:
+                det = self.detector.detect(capture_result)
+                changed = det.changed
+            if not changed:
                 return PipelineResult(
                     capture=capture_result,
                     ocr=None,
                     translation=None,
                     skipped=True,
+                    region_id=region_id,
                 )
 
         # 3. 변경 감지 통과 — 실제 처리 시작
@@ -177,6 +188,7 @@ class Pipeline:
                 capture=capture_result,
                 ocr=None,
                 translation=translation,
+                region_id=region_id,
             )
         else:
             # 경로 A: OCR + LLM (줄 단위)
@@ -195,6 +207,7 @@ class Pipeline:
                     ocr=None,
                     translation=None,
                     skipped=True,
+                    region_id=region_id,
                 )
 
             # 진단: 콘솔에 간략 출력
@@ -223,6 +236,7 @@ class Pipeline:
                         translation=cached_translation,
                         line_translations=line_trans,
                         cached=True,
+                        region_id=region_id,
                     )
                     if self._on_result:
                         self._on_result(pipeline_result)
@@ -273,6 +287,7 @@ class Pipeline:
                     ocr=None,
                     translation=TranslationResult(translated=combined_translated),
                     line_translations=None,
+                    region_id=region_id,
                 )
             else:
                 line_trans = [
@@ -287,6 +302,7 @@ class Pipeline:
                     ocr=None,
                     translation=TranslationResult(translated=combined_translated),
                     line_translations=line_trans,
+                    region_id=region_id,
                 )
 
         # 6. 결과 콜백 (Display 연결용)
@@ -298,13 +314,15 @@ class Pipeline:
     async def run_loop(
         self,
         region: tuple[int, int, int, int] | None = None,
+        regions: list[dict] | None = None,
         interval_ms: int | None = None,
     ):
         """
         주기적으로 캡처-번역을 반복합니다.
 
         Args:
-            region: 캡처 영역
+            region: 단일 영역 (하위호환)
+            regions: 다중 영역 목록 [{"id": ..., "rect": [...], "enabled": True}, ...]
             interval_ms: 캡처 주기 (None이면 Config에서 가져옴)
         """
         if interval_ms is None:
@@ -314,7 +332,18 @@ class Pipeline:
 
         while self._running:
             try:
-                await self.run_once(region)
+                if regions:
+                    for r in regions:
+                        if not self._running:
+                            break
+                        if not r.get("enabled", True):
+                            continue
+                        await self.run_once(
+                            region=tuple(r["rect"]),
+                            region_id=r["id"],
+                        )
+                else:
+                    await self.run_once(region)
                 if self._on_status:
                     self._on_status("idle")
             except Exception as e:
