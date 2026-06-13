@@ -353,6 +353,46 @@ class SettingsWindow(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
+        # ── 캡처 대상 ──
+        target_group = QGroupBox("캡처 대상")
+        target_form = QFormLayout(target_group)
+
+        self._target_mode = QComboBox()
+        self._target_mode.addItem("화면 좌표", "screen")
+        self._target_mode.addItem("윈도우 지정", "window")
+        target_form.addRow("캡처 모드:", self._target_mode)
+
+        self._window_widget = QWidget()
+        wl = QHBoxLayout(self._window_widget)
+        wl.setContentsMargins(0, 0, 0, 0)
+
+        self._window_combo = QComboBox()
+        self._window_combo.setEditable(True)
+        self._window_combo.setMinimumWidth(280)
+        self._window_combo.setPlaceholderText("윈도우를 선택하세요")
+        wl.addWidget(self._window_combo, stretch=1)
+
+        refresh_btn = QPushButton("새로고침")
+        refresh_btn.setFixedWidth(72)
+        refresh_btn.clicked.connect(self._refresh_window_list)
+        wl.addWidget(refresh_btn)
+
+        target_form.addRow("대상 윈도우:", self._window_widget)
+
+        self._window_note = QLabel(
+            "※ 윈도우 지정 시 해당 창 위치 기준으로 영역이 계산됩니다.\n"
+            "   창을 이동해도 자동으로 따라갑니다."
+        )
+        self._window_note.setStyleSheet("color: gray; font-size: 11px;")
+        target_form.addRow("", self._window_note)
+
+        self._target_mode.currentIndexChanged.connect(self._on_target_mode_changed)
+        self._window_widget.setVisible(False)
+        self._window_note.setVisible(False)
+
+        layout.addWidget(target_group)
+
+        # ── 캡처 설정 ──
         group = QGroupBox("캡처 설정")
         form = QFormLayout(group)
 
@@ -370,6 +410,51 @@ class SettingsWindow(QDialog):
         layout.addWidget(group)
         layout.addStretch()
         return widget
+
+    def _on_target_mode_changed(self, index: int):
+        is_window = self._target_mode.currentData() == "window"
+        self._window_widget.setVisible(is_window)
+        self._window_note.setVisible(is_window)
+        if is_window and self._window_combo.count() == 0:
+            self._refresh_window_list()
+
+    def _refresh_window_list(self):
+        """열려 있는 윈도우 목록을 가져와 드롭다운에 채웁니다."""
+        current = self._window_combo.currentText()
+        self._window_combo.clear()
+
+        titles = self._enumerate_windows()
+        for title in titles:
+            self._window_combo.addItem(title)
+
+        if current:
+            idx = self._window_combo.findText(current)
+            if idx >= 0:
+                self._window_combo.setCurrentIndex(idx)
+            else:
+                self._window_combo.setCurrentText(current)
+
+    @staticmethod
+    def _enumerate_windows() -> list[str]:
+        """현재 열려 있는 윈도우 타이틀 목록을 반환합니다 (Windows 전용)."""
+        import sys
+        if sys.platform != "win32":
+            return ["(Windows 환경에서만 사용 가능)"]
+        try:
+            import win32gui
+            titles: list[str] = []
+
+            def _callback(hwnd, _):
+                if win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
+                    title = win32gui.GetWindowText(hwnd)
+                    if title and title not in ("Program Manager",):
+                        titles.append(title)
+
+            win32gui.EnumWindows(_callback, None)
+            titles.sort()
+            return titles
+        except ImportError:
+            return ["(pywin32가 설치되지 않았습니다)"]
 
     def _build_translation_tab(self) -> QWidget:
         widget = QWidget()
@@ -529,6 +614,16 @@ class SettingsWindow(QDialog):
             self._ocr_lang.setCurrentText(ocr)
 
         # 캡처 탭
+        target_mode = c.get("capture.target_mode", "screen")
+        tm_idx = self._target_mode.findData(target_mode)
+        if tm_idx >= 0:
+            self._target_mode.setCurrentIndex(tm_idx)
+        self._on_target_mode_changed(self._target_mode.currentIndex())
+
+        window_title = c.get("capture.window_title", "")
+        if window_title:
+            self._window_combo.setCurrentText(window_title)
+
         self._interval_ms.setValue(c.get("capture.interval_ms", 1500))
         self._hash_threshold.setValue(c.get("detector.hash_threshold", 5))
 
@@ -591,6 +686,11 @@ class SettingsWindow(QDialog):
         c.set("language.ocr_lang", ocr_data if ocr_data else self._ocr_lang.currentText())
 
         # 캡처
+        c.set("capture.target_mode", self._target_mode.currentData())
+        if self._target_mode.currentData() == "window":
+            c.set("capture.window_title", self._window_combo.currentText())
+        else:
+            c.set("capture.window_title", "")
         c.set("capture.interval_ms", self._interval_ms.value())
         c.set("detector.hash_threshold", self._hash_threshold.value())
 
