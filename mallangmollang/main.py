@@ -521,14 +521,16 @@ class App:
         from mallangmollang.ui.ocr_preview import OcrPreviewDialog
 
         capture = ScreenCapture()
-        image = capture.capture_region(tuple(region))
-        if image is None:
+        capture_result = capture.capture_region(tuple(region))
+        if capture_result is None:
             self.toast.show("캡처 실패", "error")
             return
 
         ocr = OcrEngine()
-        lang = self.config.get("ocr.language", "auto")
-        original, preprocessed, bbox_overlay, ocr_text = ocr.preview_preprocess(image, lang)
+        lang = self.config.get("language.ocr_lang", "auto")
+        original, preprocessed, bbox_overlay, ocr_text = ocr.preview_preprocess(
+            capture_result.image, lang,
+        )
 
         dialog = OcrPreviewDialog(original, preprocessed, bbox_overlay, ocr_text)
         dialog.exec()
