@@ -172,10 +172,10 @@ class OverlayWindow(QWidget):
     def _paint_lines(self):
         """MORT 스타일: 각 줄 위치에 불투명 배경으로 원문을 덮고 번역을 표시합니다.
 
-        - 줄 폭을 영역 전체 너비로 확장 (번역이 원문보다 길어도 여유 확보)
-        - 폰트 최소 크기 = 원문의 70% (8pt 이하로는 안 내려감)
-        - 완전 불투명 배경으로 원문을 깨끗하게 덮음
-        - 이중 외곽선으로 가독성 확보
+        - 폰트 크기를 원문과 동일하게 유지 (축소하지 않음)
+        - 줄 폭을 영역 전체 너비로 확장
+        - 번역이 길면 박스 높이를 자유롭게 늘림
+        - 완전 불투명 배경 + 이중 외곽선
         """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -186,7 +186,7 @@ class OverlayWindow(QWidget):
         bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), 255)
         text_color = QColor(*p.text_color)
         text_flags = (Qt.AlignmentFlag.AlignLeft
-                      | Qt.AlignmentFlag.AlignVCenter
+                      | Qt.AlignmentFlag.AlignTop
                       | Qt.TextFlag.TextWordWrap)
 
         region_w = self.width()
@@ -196,38 +196,21 @@ class OverlayWindow(QWidget):
             if not line.text.strip():
                 continue
 
-            # 영역 전체 너비로 확장 (원문 시작 x부터 영역 끝까지)
             box_x = 0
             box_w = region_w
-            box_h = line.height
             avail_w = max(1, box_w - pad * 2)
 
-            # 폰트: 원문 크기에서 시작, 최소 70% (하한 9pt)
-            min_font = max(9, int(line.font_pt * 0.7))
-            fit_size = max(min_font, line.font_pt)
-
-            for size in range(fit_size, min_font - 1, -1):
-                test_font = QFont(p.font_family, size)
-                test_font.setBold(p.font_bold)
-                bound = QFontMetrics(test_font).boundingRect(
-                    QRect(0, 0, avail_w, 10000), text_flags, line.text,
-                )
-                if bound.height() <= box_h:
-                    fit_size = size
-                    break
-                fit_size = size
-
-            font = QFont(p.font_family, fit_size)
+            # 폰트: 원문 크기를 그대로 사용 (최소 10pt 보장)
+            font_size = max(10, line.font_pt)
+            font = QFont(p.font_family, font_size)
             font.setBold(p.font_bold)
             painter.setFont(font)
 
-            # 최소 폰트에서도 안 맞으면 박스 높이를 늘림
-            final_bound = QFontMetrics(font).boundingRect(
+            # 박스 높이: 원문 높이 또는 번역 텍스트에 필요한 높이 중 큰 값
+            text_bound = QFontMetrics(font).boundingRect(
                 QRect(0, 0, avail_w, 10000), text_flags, line.text,
             )
-            needed_h = final_bound.height() + pad * 2
-            if needed_h > box_h:
-                box_h = needed_h
+            box_h = max(line.height, text_bound.height() + pad * 2)
 
             # 불투명 배경 — 원문을 완전히 덮음
             painter.setPen(Qt.PenStyle.NoPen)
@@ -235,7 +218,7 @@ class OverlayWindow(QWidget):
             painter.drawRect(box_x, line.y, box_w, box_h)
 
             # 텍스트 영역
-            draw_rect = QRect(box_x + pad, line.y, avail_w, box_h)
+            draw_rect = QRect(box_x + pad, line.y + pad, avail_w, box_h - pad * 2)
 
             # 이중 외곽선 (바깥 두꺼운 선 + 안쪽 얇은 선)
             if p.outline:
