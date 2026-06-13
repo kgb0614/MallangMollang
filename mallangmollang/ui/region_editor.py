@@ -19,8 +19,9 @@ class RegionHandle(QWidget):
     - ✕ 버튼 → 삭제
     """
 
-    region_changed = pyqtSignal(int, list)  # (region_id, [x, y, w, h])
-    region_deleted = pyqtSignal(int)        # region_id
+    region_changed = pyqtSignal(int, list)     # (region_id, [x, y, w, h])
+    region_deleted = pyqtSignal(int)           # region_id
+    translate_requested = pyqtSignal(int)      # region_id — 이 영역만 번역
 
     def __init__(self, region_id: int, name: str, rect: list[int], parent=None):
         super().__init__(parent)
@@ -42,6 +43,18 @@ class RegionHandle(QWidget):
         self._label.move(4, 4)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
+        # 번역 버튼 (이 영역만 스냅샷 번역)
+        self._translate_btn = QPushButton("▶", self)
+        self._translate_btn.setFixedSize(22, 22)
+        self._translate_btn.setStyleSheet(
+            "QPushButton { background: rgba(30,100,180,180); color: white; "
+            "border: none; border-radius: 3px; font-size: 13px; font-weight: bold; }"
+            "QPushButton:hover { background: rgba(40,130,220,240); }"
+        )
+        self._translate_btn.clicked.connect(
+            lambda: self.translate_requested.emit(self.region_id)
+        )
+
         # 삭제 버튼
         self._close_btn = QPushButton("✕", self)
         self._close_btn.setFixedSize(22, 22)
@@ -51,7 +64,7 @@ class RegionHandle(QWidget):
             "QPushButton:hover { background: rgba(220,30,30,240); }"
         )
         self._close_btn.clicked.connect(lambda: self.region_deleted.emit(self.region_id))
-        self._update_close_btn_pos()
+        self._update_btn_positions()
 
     def _setup_window(self):
         self.setWindowFlags(
@@ -64,12 +77,13 @@ class RegionHandle(QWidget):
         self.setMouseTracking(True)
         self.setMinimumSize(_MIN_SIZE, _MIN_SIZE)
 
-    def _update_close_btn_pos(self):
+    def _update_btn_positions(self):
         self._close_btn.move(self.width() - 26, 4)
+        self._translate_btn.move(self.width() - 52, 4)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._update_close_btn_pos()
+        self._update_btn_positions()
 
     def paintEvent(self, event):
         painter = QPainter(self)

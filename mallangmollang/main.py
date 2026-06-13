@@ -449,6 +449,7 @@ class App:
             handle = RegionHandle(r["id"], r.get("name", ""), r["rect"])
             handle.region_changed.connect(self._on_region_handle_changed)
             handle.region_deleted.connect(self._on_region_handle_deleted)
+            handle.translate_requested.connect(self._on_region_translate)
             handle.show()
             self._region_handles[r["id"]] = handle
 
@@ -459,6 +460,7 @@ class App:
         handle = RegionHandle(region_id, name, rect)
         handle.region_changed.connect(self._on_region_handle_changed)
         handle.region_deleted.connect(self._on_region_handle_deleted)
+        handle.translate_requested.connect(self._on_region_translate)
         handle.show()
         self._region_handles[region_id] = handle
 
@@ -507,6 +509,49 @@ class App:
         if region_id in self._indicators:
             self._indicators.pop(region_id).deleteLater()
         self.toast.show("영역 삭제됨", "info")
+
+    def _on_region_translate(self, region_id: int):
+        """영역 핸들의 ▶ 버튼 — 해당 영역만 스냅샷 번역합니다."""
+        if self._snapshot_running or self._running:
+            return
+
+        region_data = None
+        for r in self.config.get_all_regions():
+            if r["id"] == region_id:
+                region_data = r
+                break
+        if not region_data:
+            return
+
+        self.pipeline = None
+        if not self._ensure_pipeline():
+            return
+
+        self._snapshot_running = True
+
+        if self.config.get("display.mode", "overlay") == "panel":
+            self.side_panel.show()
+
+        def run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    self.pipeline.run_once(
+                        region=tuple(region_data["rect"]),
+                        region_id=region_data["id"],
+                    )
+                )
+                self._bridge.status_changed.emit("idle")
+            except Exception as e:
+                print(f"[App] 영역 {region_id} 스냅샷 오류: {e}")
+                self._bridge.error_detail.emit(str(e))
+                self._bridge.status_changed.emit("error")
+            finally:
+                self._snapshot_running = False
+                loop.close()
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_ocr_preview(self):
         """현재 캡처 영역의 OCR 전처리 결과를 미리보기 창에 표시합니다."""
