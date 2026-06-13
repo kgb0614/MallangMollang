@@ -391,6 +391,9 @@ class SettingsWindow(QDialog):
         self._vision_mode = QCheckBox("Vision API 모드 (OCR 단계 건너뜀)")
         form.addRow("", self._vision_mode)
 
+        self._auto_clipboard = QCheckBox("번역 결과를 클립보드에 자동 복사")
+        form.addRow("", self._auto_clipboard)
+
         self._cache_max_size = QSpinBox()
         self._cache_max_size.setRange(10, 1000)
         form.addRow("캐시 최대 항목:", self._cache_max_size)
@@ -537,6 +540,7 @@ class SettingsWindow(QDialog):
 
         self._context_count.setValue(c.get("translation.context_count", 3))
         self._vision_mode.setChecked(c.get("translation.vision_mode", False))
+        self._auto_clipboard.setChecked(c.get("translation.auto_clipboard", False))
         self._cache_max_size.setValue(c.get("cache.max_size", 100))
 
         # 표시 탭
@@ -594,6 +598,7 @@ class SettingsWindow(QDialog):
         c.set("translation.run_mode", self._run_mode.currentData())
         c.set("translation.context_count", self._context_count.value())
         c.set("translation.vision_mode", self._vision_mode.isChecked())
+        c.set("translation.auto_clipboard", self._auto_clipboard.isChecked())
         c.set("cache.max_size", self._cache_max_size.value())
 
         # 표시

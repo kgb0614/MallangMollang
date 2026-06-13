@@ -190,6 +190,7 @@ class App:
             ov = self._get_overlay(region_id)
             ov.show_translation(text, region=region)
             self._apply_snapshot_overlay_mode_for(ov)
+        self._copy_to_clipboard(text)
 
     def _on_lines_ready(self, line_translations, region, region_id: int):
         """줄 단위 번역 결과를 표시 모드에 따라 분기합니다."""
@@ -213,6 +214,8 @@ class App:
             ov = self._get_overlay(region_id)
             ov.show_lines(lines, region=region)
             self._apply_snapshot_overlay_mode_for(ov)
+        translated_text = "\n".join(lt.translated for lt in line_translations)
+        self._copy_to_clipboard(translated_text)
 
     def _on_status_changed(self, status: str):
         """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""
@@ -415,6 +418,11 @@ class App:
                 loop.close()
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _copy_to_clipboard(self, text: str):
+        """auto_clipboard 설정이 활성화되어 있으면 번역 결과를 클립보드에 복사합니다."""
+        if self.config.get("translation.auto_clipboard", False) and text.strip():
+            QApplication.clipboard().setText(text)
 
     def _apply_snapshot_overlay_mode_for(self, ov: OverlayWindow):
         """스냅샷 모드일 때 오버레이에 클릭 닫기 + 자동 타이머를 설정합니다."""

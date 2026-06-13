@@ -69,6 +69,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "vision_mode": False,     # Vision API 모드 사용 여부
         "context_count": 3,       # 문맥 기억 개수 (이전 N회 번역 포함)
         "active_profile": None,   # 활성 번역 프로필 이름
+        "auto_clipboard": False,  # 번역 결과 클립보드 자동 복사
     },
 
     # 변경 감지 설정
