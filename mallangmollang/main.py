@@ -195,6 +195,7 @@ class App:
         if self.config.get("display.mode", "overlay") == "panel":
             self.side_panel.add_entry(text)
         else:
+            self._hide_indicator_for(region_id)
             ov = self._get_overlay(region_id)
             ov.show_translation(text, region=region)
             self._apply_snapshot_overlay_mode_for(ov)
@@ -207,6 +208,7 @@ class App:
             translated = "\n".join(lt.translated for lt in line_translations)
             self.side_panel.add_entry(translated, original)
         else:
+            self._hide_indicator_for(region_id)
             from mallangmollang.display.overlay import TranslatedLine
             lines = [
                 TranslatedLine(
@@ -225,17 +227,32 @@ class App:
         translated_text = "\n".join(lt.translated for lt in line_translations)
         self._copy_to_clipboard(translated_text)
 
+    def _hide_indicator_for(self, region_id: int):
+        """오버레이 표시 시 해당 영역의 인디케이터를 숨깁니다."""
+        if region_id == 0:
+            self.indicator.hide()
+        elif region_id in self._indicators:
+            self._indicators[region_id].hide()
+
     def _on_status_changed(self, status: str):
         """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""
+        # 모든 인디케이터 상태 업데이트
         self.indicator.set_status(status)
+        for ind in self._indicators.values():
+            ind.set_status(status)
+
         if status == "translating":
             self.overlay.hide_translation()
+            self.panel.set_status("● 번역 중...", "rgba(255,210,50,220)")
         elif status == "error":
             self.panel.set_status("● 오류 발생", "rgba(220,50,50,220)")
+        elif status == "idle" and self._running:
+            self.panel.set_status("● 대기 중", "rgba(100,200,100,220)")
 
         # 스냅샷 완료 후 영역 핸들 복원
         if status in ("idle", "error") and not self._running:
             self._show_region_handles()
+            self.panel.set_status("● 대기", "rgba(180,180,180,220)")
 
     def _on_error_detail(self, message: str):
         """에러 상세 메시지를 토스트로 표시합니다."""

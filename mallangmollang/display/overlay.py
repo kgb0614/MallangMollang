@@ -187,7 +187,8 @@ class OverlayWindow(QWidget):
         p = self.preset
         text_color = QColor(*p.text_color)
         bg = QColor(*p.bg_color)
-        use_bg = bg.alpha() > 0
+        # line 모드: 원문을 확실히 덮기 위해 배경을 불투명으로 강제
+        bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), 255) if bg.alpha() > 0 else None
         region_w = self.width()
         pad = 4
 
@@ -217,9 +218,9 @@ class OverlayWindow(QWidget):
 
             actual_y = line.y + y_offset
 
-            if use_bg:
+            if bg_opaque:
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(bg))
+                painter.setBrush(QBrush(bg_opaque))
                 painter.drawRect(box_x, actual_y, box_w, box_h)
 
             draw_x = box_x + pad
