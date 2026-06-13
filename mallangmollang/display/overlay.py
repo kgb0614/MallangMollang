@@ -175,9 +175,9 @@ class OverlayWindow(QWidget):
     def _paint_lines(self):
         """각 줄의 번역을 원문 위치에 배치합니다 (MORT 스타일).
 
-        - 배경 없이 이중 외곽선 + 본문 텍스트만 렌더링
-        - QPainterPath로 텍스트 경로를 생성하여 strokePath/fillPath 사용
-        - 원문이 보이는 상태에서 번역이 자연스럽게 얹히는 효과
+        - QPainterPath 기반 이중 외곽선으로 고품질 텍스트 렌더링
+        - 프리셋 bg_color 알파값에 따라 배경 표시 여부 결정
+          (알파 0 → 배경 없음, 알파 > 0 → 해당 투명도로 배경 표시)
         """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -185,6 +185,8 @@ class OverlayWindow(QWidget):
 
         p = self.preset
         text_color = QColor(*p.text_color)
+        bg = QColor(*p.bg_color)
+        use_bg = bg.alpha() > 0
         region_w = self.width()
         pad = 4
 
@@ -202,43 +204,45 @@ class OverlayWindow(QWidget):
             box_w = max(line.width, region_w - line.x)
             avail_w = max(1, box_w - pad * 2)
 
-            # 텍스트를 avail_w 내에서 줄바꿈 처리
             wrapped = self._wrap_text(fm, line.text, avail_w)
 
             line_h = fm.height()
             line_spacing = int(line_h * 1.2)
+            total_text_h = line_spacing * len(wrapped)
+            box_h = max(line.height, total_text_h + pad)
+
+            # 배경 (프리셋 bg_color 알파 > 0 일 때만)
+            if use_bg:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(bg))
+                painter.drawRect(box_x, line.y, box_w, box_h)
+
             draw_x = box_x + pad
-            draw_y = line.y + fm.ascent()
+            draw_y = line.y + fm.ascent() + (pad // 2)
 
             for segment in wrapped:
-                # QPainterPath로 텍스트 경로 생성
                 path = QPainterPath()
                 path.addText(QPointF(draw_x, draw_y), font, segment)
 
                 if p.outline:
                     outline_color = QColor(*p.outline_color)
 
-                    # 외곽선 2단계 (MORT 스타일: 5px 외곽 + 2px 내곽)
                     stroker_outer = QPainterPathStroker()
                     stroker_outer.setWidth(5)
                     stroker_outer.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-                    outer_path = stroker_outer.createStroke(path)
                     painter.setPen(Qt.PenStyle.NoPen)
                     painter.setBrush(QBrush(outline_color))
-                    painter.drawPath(outer_path)
+                    painter.drawPath(stroker_outer.createStroke(path))
 
                     stroker_inner = QPainterPathStroker()
                     stroker_inner.setWidth(2)
                     stroker_inner.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-                    inner_path = stroker_inner.createStroke(path)
-                    inner_outline = QColor(outline_color)
-                    inner_outline.setAlpha(min(255, outline_color.alpha() + 40))
-                    painter.setBrush(QBrush(inner_outline))
-                    painter.drawPath(inner_path)
+                    inner_color = QColor(outline_color)
+                    inner_color.setAlpha(min(255, outline_color.alpha() + 40))
+                    painter.setBrush(QBrush(inner_color))
+                    painter.drawPath(stroker_inner.createStroke(path))
 
-                # 본문 텍스트 채우기
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(text_color))
                 painter.fillPath(path, QBrush(text_color))
 
                 draw_y += line_spacing
