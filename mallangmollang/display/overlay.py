@@ -17,8 +17,11 @@ from dataclasses import dataclass
 
 from PyQt6.QtWidgets import QWidget, QApplication
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QFontMetrics, QMouseEvent
-from PyQt6.QtCore import QRect, pyqtSignal
+from PyQt6.QtGui import (
+    QFont, QColor, QPainter, QBrush, QPen, QFontMetrics, QMouseEvent,
+    QPainterPath, QPainterPathStroker,
+)
+from PyQt6.QtCore import QRect, QPointF, pyqtSignal
 
 from mallangmollang.display.presets import OverlayPreset, PRESET_DEFAULT
 from mallangmollang.display.area_indicator import _exclude_from_screen_capture
@@ -170,25 +173,18 @@ class OverlayWindow(QWidget):
             self._paint_block()
 
     def _paint_lines(self):
-        """각 줄의 번역을 원문 위치에 1:1로 배치합니다.
+        """각 줄의 번역을 원문 위치에 배치합니다 (MORT 스타일).
 
-        - 각 줄의 원문 위치(x, y)에 번역 텍스트를 표시
-        - 배경은 원문 영역만 덮음 (번역이 길면 너비 확장)
-        - 폰트 크기 = 원문과 동일 (축소 없음)
-        - 높이가 부족하면 아래로 확장
+        - 배경 없이 이중 외곽선 + 본문 텍스트만 렌더링
+        - QPainterPath로 텍스트 경로를 생성하여 strokePath/fillPath 사용
+        - 원문이 보이는 상태에서 번역이 자연스럽게 얹히는 효과
         """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
         p = self.preset
-        bg = QColor(*p.bg_color)
-        bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), 255)
         text_color = QColor(*p.text_color)
-        text_flags = (Qt.AlignmentFlag.AlignLeft
-                      | Qt.AlignmentFlag.AlignVCenter
-                      | Qt.TextFlag.TextWordWrap)
-
         region_w = self.width()
         pad = 4
 
@@ -196,52 +192,77 @@ class OverlayWindow(QWidget):
             if not line.text.strip():
                 continue
 
-            # 폰트: 원문 크기 그대로 (최소 10pt)
             font_size = max(10, line.font_pt)
             font = QFont(p.font_family, font_size)
             font.setBold(p.font_bold)
             painter.setFont(font)
 
-            # 배경 너비: 원문 영역 기준, 번역이 길면 영역 끝까지 확장
+            fm = QFontMetrics(font)
             box_x = line.x
             box_w = max(line.width, region_w - line.x)
             avail_w = max(1, box_w - pad * 2)
 
-            # 박스 높이: 번역 텍스트에 필요한 만큼 (원문 높이 이상)
-            text_bound = QFontMetrics(font).boundingRect(
-                QRect(0, 0, avail_w, 10000), text_flags, line.text,
-            )
-            box_h = max(line.height, text_bound.height() + pad * 2)
+            # 텍스트를 avail_w 내에서 줄바꿈 처리
+            wrapped = self._wrap_text(fm, line.text, avail_w)
 
-            # 불투명 배경 — 원문 위치에 맞춰 덮음
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(bg_opaque))
-            painter.drawRect(box_x, line.y, box_w, box_h)
+            line_h = fm.height()
+            line_spacing = int(line_h * 1.2)
+            draw_x = box_x + pad
+            draw_y = line.y + fm.ascent()
 
-            # 텍스트 영역
-            draw_rect = QRect(box_x + pad, line.y, avail_w, box_h)
+            for segment in wrapped:
+                # QPainterPath로 텍스트 경로 생성
+                path = QPainterPath()
+                path.addText(QPointF(draw_x, draw_y), font, segment)
 
-            # 이중 외곽선
-            if p.outline:
-                outer_color = QColor(*p.outline_color)
-                painter.setPen(QPen(outer_color, 4))
-                for dx, dy in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
-                    painter.drawText(
-                        draw_rect.adjusted(dx, dy, dx, dy),
-                        text_flags, line.text,
-                    )
-                painter.setPen(QPen(outer_color, 2))
-                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    painter.drawText(
-                        draw_rect.adjusted(dx, dy, dx, dy),
-                        text_flags, line.text,
-                    )
+                if p.outline:
+                    outline_color = QColor(*p.outline_color)
 
-            # 본문 텍스트
-            painter.setPen(QPen(text_color))
-            painter.drawText(draw_rect, text_flags, line.text)
+                    # 외곽선 2단계 (MORT 스타일: 5px 외곽 + 2px 내곽)
+                    stroker_outer = QPainterPathStroker()
+                    stroker_outer.setWidth(5)
+                    stroker_outer.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                    outer_path = stroker_outer.createStroke(path)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QBrush(outline_color))
+                    painter.drawPath(outer_path)
+
+                    stroker_inner = QPainterPathStroker()
+                    stroker_inner.setWidth(2)
+                    stroker_inner.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                    inner_path = stroker_inner.createStroke(path)
+                    inner_outline = QColor(outline_color)
+                    inner_outline.setAlpha(min(255, outline_color.alpha() + 40))
+                    painter.setBrush(QBrush(inner_outline))
+                    painter.drawPath(inner_path)
+
+                # 본문 텍스트 채우기
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(text_color))
+                painter.fillPath(path, QBrush(text_color))
+
+                draw_y += line_spacing
 
         painter.end()
+
+    @staticmethod
+    def _wrap_text(fm: QFontMetrics, text: str, max_width: int) -> list[str]:
+        """텍스트를 max_width에 맞게 줄바꿈합니다 (글자 단위)."""
+        if fm.horizontalAdvance(text) <= max_width:
+            return [text]
+
+        lines: list[str] = []
+        current = ""
+        for char in text:
+            test = current + char
+            if fm.horizontalAdvance(test) > max_width and current:
+                lines.append(current)
+                current = char
+            else:
+                current = test
+        if current:
+            lines.append(current)
+        return lines
 
     def _paint_block(self):
         """블록 모드: 전체 영역에 반투명 배경 + 텍스트 (기존 방식)."""
