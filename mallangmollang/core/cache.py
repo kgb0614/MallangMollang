@@ -2,11 +2,14 @@
 번역 캐시 모듈
 OCR 텍스트 해시를 키로, 번역 결과를 값으로 저장하는 LRU 캐시입니다.
 동일 텍스트가 재등장하면 API 호출 없이 즉시 반환합니다.
+디스크에 저장/로드하여 앱 재시작 후에도 캐시를 유지합니다.
 """
 
 import hashlib
+import json
 from collections import OrderedDict
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -76,6 +79,35 @@ class TranslationCache:
                 # LRU: 가장 오래된 항목 제거
                 self._store.popitem(last=False)
             self._store[key] = translated
+
+    def save(self, path: Path) -> None:
+        """캐시를 JSON 파일로 저장합니다."""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = list(self._store.items())
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            print(f"[Cache] 캐시 저장 완료: {self.size}개 항목 → {path.name}")
+        except Exception as e:
+            print(f"[Cache] 캐시 저장 실패: {e}")
+
+    def load(self, path: Path) -> None:
+        """JSON 파일에서 캐시를 불러옵니다. 파일이 없으면 무시합니다."""
+        if not path.exists():
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                print("[Cache] 캐시 파일 형식 오류 — 무시합니다.")
+                return
+            # max_size 초과 시 뒤쪽(최신) 항목만 로드
+            if len(data) > self.max_size:
+                data = data[-self.max_size:]
+            self._store = OrderedDict(data)
+            print(f"[Cache] 캐시 로드 완료: {self.size}개 항목 ← {path.name}")
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"[Cache] 캐시 파일 손상 — 빈 캐시로 시작합니다: {e}")
 
     def clear(self):
         """캐시를 전체 초기화합니다 (PRD F4-3: 수동 초기화)."""

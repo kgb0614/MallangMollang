@@ -10,8 +10,11 @@ import threading
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from pathlib import Path
+
 from mallangmollang.infra.config import Config
 from mallangmollang.infra.hotkeys import HotkeyManager
+from mallangmollang.core.cache import TranslationCache
 from mallangmollang.core.pipeline import Pipeline
 from mallangmollang.display.overlay import OverlayWindow
 from mallangmollang.display.area_indicator import AreaIndicatorWindow
@@ -23,6 +26,10 @@ from mallangmollang.ui.region_selector import RegionSelector
 from mallangmollang.core.profiles import ProfileManager
 from mallangmollang.ui.control_panel import ControlPanel
 from mallangmollang.ui.toast import ToastManager
+
+
+# 캐시 파일 경로 (config.json과 동일 위치)
+_CACHE_PATH = Path(__file__).parent.parent / "translation_cache.json"
 
 
 class _Bridge(QObject):
@@ -45,6 +52,12 @@ class App:
     def __init__(self, qt_app: QApplication):
         self.qt_app = qt_app
         self.config = Config.get_instance()
+
+        # 영속 캐시: 앱 시작 시 디스크에서 로드
+        self.cache = TranslationCache(
+            max_size=self.config.get("cache.max_size", 100)
+        )
+        self.cache.load(_CACHE_PATH)
 
         # 컴포넌트 초기화
         self.overlay = OverlayWindow(
@@ -119,7 +132,7 @@ class App:
         if not self._is_provider_configured():
             return None
 
-        pipeline = Pipeline.from_config(self.config)
+        pipeline = Pipeline.from_config(self.config, cache=self.cache)
 
         def on_result(result):
             region = self.config.get("capture.region")
@@ -443,6 +456,9 @@ class App:
     def _on_quit(self):
         """앱을 종료합니다."""
         self._stop_translation()
+
+        # 영속 캐시: 디스크에 저장
+        self.cache.save(_CACHE_PATH)
 
         if self.pipeline:
             # asyncio 루프가 열려있으면 close 실행

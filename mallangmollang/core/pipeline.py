@@ -88,8 +88,17 @@ class Pipeline:
         return self._last_debug_info
 
     @classmethod
-    def from_config(cls, config: Config) -> "Pipeline":
-        """Config 설정으로 파이프라인을 구성합니다."""
+    def from_config(
+        cls,
+        config: Config,
+        cache: TranslationCache | None = None,
+    ) -> "Pipeline":
+        """Config 설정으로 파이프라인을 구성합니다.
+
+        Args:
+            config: 설정 객체
+            cache: 외부에서 주입할 캐시. None이면 새로 생성.
+        """
         from mallangmollang.providers import create_provider
 
         provider = create_provider(config)
@@ -100,6 +109,11 @@ class Pipeline:
             context_count=config.get("translation.context_count", 3),
         )
 
+        if cache is None:
+            cache = TranslationCache(
+                max_size=config.get("cache.max_size", 100)
+            )
+
         return cls(
             capture=ScreenCapture(),
             ocr=OcrEngine(),
@@ -108,9 +122,7 @@ class Pipeline:
             detector=ChangeDetector(
                 threshold=config.get("detector.hash_threshold", 5)
             ),
-            cache=TranslationCache(
-                max_size=config.get("cache.max_size", 100)
-            ),
+            cache=cache,
         )
 
     def on_result(self, callback: OnResultCallback):
