@@ -8,7 +8,7 @@ import sys
 import threading
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from pathlib import Path
 
@@ -92,8 +92,15 @@ class App:
         # 영역 핸들: 영역 지정 즉시 표시, 항상 편집 가능
         self._region_handles: dict[int, "RegionHandle"] = {}
 
+        # 윈도우 추적: 윈도우 모드에서 창 위치 변화 감지
+        self._window_track_timer = QTimer()
+        self._window_track_timer.setInterval(300)
+        self._window_track_timer.timeout.connect(self._track_window_position)
+        self._last_window_pos: tuple[int, int] | None = None
+
         self._connect_signals()
         self._init_region_handles()
+        self._start_window_tracking()
 
     def _connect_signals(self):
         """각 컴포넌트의 시그널을 슬롯에 연결합니다."""
@@ -280,13 +287,13 @@ class App:
         if regions:
             for r in regions:
                 ind = self._get_indicator(r["id"])
-                rx, ry, rw, rh = r["rect"]
-                ind.set_region(rx, ry, rw, rh)
+                sr = self._relative_to_screen(r["rect"])
+                ind.set_region(sr[0], sr[1], sr[2], sr[3])
                 ind.set_status("idle")
                 ind.show()
         elif region:
-            rx, ry, rw, rh = region
-            self.indicator.set_region(rx, ry, rw, rh)
+            sr = self._relative_to_screen(list(region))
+            self.indicator.set_region(sr[0], sr[1], sr[2], sr[3])
             self.indicator.set_status("idle")
             self.indicator.show()
 
@@ -387,12 +394,12 @@ class App:
         if regions:
             for r in regions:
                 ind = self._get_indicator(r["id"])
-                rx, ry, rw, rh = r["rect"]
-                ind.set_region(rx, ry, rw, rh)
+                sr = self._relative_to_screen(r["rect"])
+                ind.set_region(sr[0], sr[1], sr[2], sr[3])
                 ind.show()
         elif region:
-            rx, ry, rw, rh = region
-            self.indicator.set_region(rx, ry, rw, rh)
+            sr = self._relative_to_screen(list(region))
+            self.indicator.set_region(sr[0], sr[1], sr[2], sr[3])
             self.indicator.show()
 
         self.panel.set_status("● 번역 중...", "rgba(255,210,50,220)")
@@ -446,7 +453,8 @@ class App:
         from mallangmollang.ui.region_editor import RegionHandle
 
         for r in self.config.get_all_regions():
-            handle = RegionHandle(r["id"], r.get("name", ""), r["rect"])
+            screen_rect = self._relative_to_screen(r["rect"])
+            handle = RegionHandle(r["id"], r.get("name", ""), screen_rect)
             handle.region_changed.connect(self._on_region_handle_changed)
             handle.region_deleted.connect(self._on_region_handle_deleted)
             handle.translate_requested.connect(self._on_region_translate)
@@ -474,6 +482,67 @@ class App:
         for handle in self._region_handles.values():
             handle.hide()
 
+    # ── 윈도우 추적 ──
+
+    def _is_window_mode(self) -> bool:
+        return self.config.get("capture.target_mode", "screen") == "window"
+
+    def _get_window_origin(self) -> tuple[int, int] | None:
+        """현재 대상 윈도우의 좌상단 좌표를 반환합니다."""
+        if not self._is_window_mode():
+            return None
+        title = self.config.get("capture.window_title", "")
+        if not title:
+            return None
+        from mallangmollang.core.capture import ScreenCapture
+        rect = ScreenCapture.get_window_rect(title)
+        if rect is None:
+            return None
+        return (rect[0], rect[1])
+
+    def _screen_to_relative(self, abs_rect: list[int]) -> list[int]:
+        """절대 화면 좌표 → 윈도우 기준 상대 좌표. 윈도우 모드가 아니면 그대로 반환."""
+        origin = self._get_window_origin()
+        if origin is None:
+            return abs_rect
+        wx, wy = origin
+        return [abs_rect[0] - wx, abs_rect[1] - wy, abs_rect[2], abs_rect[3]]
+
+    def _relative_to_screen(self, rel_rect: list[int]) -> list[int]:
+        """윈도우 기준 상대 좌표 → 절대 화면 좌표. 윈도우 모드가 아니면 그대로 반환."""
+        origin = self._get_window_origin()
+        if origin is None:
+            return rel_rect
+        wx, wy = origin
+        return [rel_rect[0] + wx, rel_rect[1] + wy, rel_rect[2], rel_rect[3]]
+
+    def _start_window_tracking(self):
+        """윈도우 모드이면 위치 추적 타이머를 시작합니다."""
+        if self._is_window_mode():
+            self._last_window_pos = self._get_window_origin()
+            self._window_track_timer.start()
+        else:
+            self._window_track_timer.stop()
+
+    def _track_window_position(self):
+        """윈도우 위치가 변했으면 핸들들을 이동시킵니다."""
+        if not self._is_window_mode():
+            self._window_track_timer.stop()
+            return
+        current = self._get_window_origin()
+        if current is None or current == self._last_window_pos:
+            return
+        self._last_window_pos = current
+        self._update_handle_positions()
+
+    def _update_handle_positions(self):
+        """저장된 상대 좌표를 현재 윈도우 위치로 변환하여 핸들을 이동합니다."""
+        for r in self.config.get_all_regions():
+            handle = self._region_handles.get(r["id"])
+            if handle:
+                screen_rect = self._relative_to_screen(r["rect"])
+                handle.update_rect(screen_rect)
+
     def _on_dismiss(self):
         """ESC 키로 모든 오버레이를 숨깁니다. 영역 핸들은 유지됩니다."""
         self.overlay.hide_translation()
@@ -494,7 +563,8 @@ class App:
 
     def _on_region_handle_changed(self, region_id: int, rect: list[int]):
         """편집 핸들에서 영역 위치/크기가 변경되었을 때."""
-        self.config.update_region(region_id, rect=rect)
+        store_rect = self._screen_to_relative(rect)
+        self.config.update_region(region_id, rect=store_rect)
 
     def _on_region_handle_deleted(self, region_id: int):
         """편집 핸들에서 영역 삭제가 요청되었을 때."""
@@ -643,6 +713,11 @@ class App:
         else:
             self.side_panel.hide()
 
+        # 윈도우 추적 재시작 (설정 변경 반영)
+        self._start_window_tracking()
+        if self._is_window_mode():
+            self._update_handle_positions()
+
     def _on_region_select(self):
         """영역 선택 UI를 시작합니다. 패널을 숨겨서 간섭을 방지합니다."""
         if self._running:
@@ -658,10 +733,14 @@ class App:
             self.toast.show("영역은 최대 5개까지 지정할 수 있습니다.", "warning")
             self.panel.show()
             return
-        new_region = self.config.add_region([x, y, w, h])
+
+        # 윈도우 모드: 절대 좌표를 윈도우 기준 상대 좌표로 변환하여 저장
+        store_rect = self._screen_to_relative([x, y, w, h])
+        new_region = self.config.add_region(store_rect)
         if new_region:
+            # 핸들은 절대 좌표로 표시
             self._create_region_handle(
-                new_region["id"], new_region["name"], new_region["rect"],
+                new_region["id"], new_region["name"], [x, y, w, h],
             )
             self.toast.show(f"영역 추가: {new_region['name']} ({w}×{h})", "success")
         self.panel.show()

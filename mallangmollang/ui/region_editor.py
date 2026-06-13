@@ -201,6 +201,11 @@ class RegionHandle(QWidget):
         rx, ry, rw, rh = self._region_rect()
         self.region_changed.emit(self.region_id, [rx, ry, rw, rh])
 
+    def update_rect(self, rect: list[int]):
+        """외부에서 영역 위치를 갱신합니다 (윈도우 추적용)."""
+        x, y, w, h = rect
+        self.setGeometry(x, y - _TOOLBAR_H, w, h + _TOOLBAR_H)
+
     def _set_cursor_for_edge(self, edge: str):
         cursors = {
             "topleft": Qt.CursorShape.SizeFDiagCursor,

@@ -152,6 +152,21 @@ class ScreenCapture:
             draw.rectangle([rx, ry, rx + rw, ry + rh], fill=(0, 0, 0))
         return masked
 
+    @staticmethod
+    def get_window_rect(window_title: str) -> tuple[int, int, int, int] | None:
+        """윈도우의 화면 좌표 (left, top, width, height)를 반환합니다."""
+        if sys.platform != "win32":
+            return None
+        try:
+            import win32gui
+            hwnd = win32gui.FindWindow(None, window_title)
+            if not hwnd or not win32gui.IsWindowVisible(hwnd):
+                return None
+            wl, wt, wr, wb = win32gui.GetWindowRect(hwnd)
+            return (wl, wt, wr - wl, wb - wt)
+        except Exception:
+            return None
+
     def close(self):
         """하위 호환용 — 더 이상 핸들을 보관하지 않으므로 no-op."""
         pass
