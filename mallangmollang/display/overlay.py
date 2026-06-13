@@ -170,10 +170,12 @@ class OverlayWindow(QWidget):
             self._paint_block()
 
     def _paint_lines(self):
-        """각 줄 위치에 불투명 배경 + 번역 텍스트를 그립니다.
+        """MORT 스타일: 각 줄 위치에 불투명 배경으로 원문을 덮고 번역을 표시합니다.
 
-        폰트 자동 축소: 번역 텍스트가 OCR 원본 영역에 맞을 때까지
-        폰트 크기를 1pt씩 줄임. 최소 8pt. 최소에서도 안 맞으면 박스 높이를 늘림.
+        - 줄 폭을 영역 전체 너비로 확장 (번역이 원문보다 길어도 여유 확보)
+        - 폰트 최소 크기 = 원문의 70% (8pt 이하로는 안 내려감)
+        - 완전 불투명 배경으로 원문을 깨끗하게 덮음
+        - 이중 외곽선으로 가독성 확보
         """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -181,32 +183,36 @@ class OverlayWindow(QWidget):
 
         p = self.preset
         bg = QColor(*p.bg_color)
-        bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), max(bg.alpha(), 220))
+        bg_opaque = QColor(bg.red(), bg.green(), bg.blue(), 255)
         text_color = QColor(*p.text_color)
         text_flags = (Qt.AlignmentFlag.AlignLeft
-                      | Qt.AlignmentFlag.AlignTop
+                      | Qt.AlignmentFlag.AlignVCenter
                       | Qt.TextFlag.TextWordWrap)
+
+        region_w = self.width()
+        pad = 4
 
         for line in self._lines:
             if not line.text.strip():
                 continue
 
-            pad = 3
-            box_w = line.width
+            # 영역 전체 너비로 확장 (원문 시작 x부터 영역 끝까지)
+            box_x = 0
+            box_w = region_w
             box_h = line.height
             avail_w = max(1, box_w - pad * 2)
-            avail_h = max(1, box_h - pad * 2)
 
-            # OCR 폰트에서 시작, 최소 8pt까지 축소 시도
-            min_font = 8
+            # 폰트: 원문 크기에서 시작, 최소 70% (하한 9pt)
+            min_font = max(9, int(line.font_pt * 0.7))
             fit_size = max(min_font, line.font_pt)
+
             for size in range(fit_size, min_font - 1, -1):
                 test_font = QFont(p.font_family, size)
                 test_font.setBold(p.font_bold)
                 bound = QFontMetrics(test_font).boundingRect(
                     QRect(0, 0, avail_w, 10000), text_flags, line.text,
                 )
-                if bound.height() <= avail_h:
+                if bound.height() <= box_h:
                     fit_size = size
                     break
                 fit_size = size
@@ -215,32 +221,41 @@ class OverlayWindow(QWidget):
             font.setBold(p.font_bold)
             painter.setFont(font)
 
-            # 최소 폰트에서도 안 맞으면 박스 높이를 텍스트에 맞게 늘림
+            # 최소 폰트에서도 안 맞으면 박스 높이를 늘림
             final_bound = QFontMetrics(font).boundingRect(
                 QRect(0, 0, avail_w, 10000), text_flags, line.text,
             )
             needed_h = final_bound.height() + pad * 2
             if needed_h > box_h:
                 box_h = needed_h
-                avail_h = box_h - pad * 2
 
-            # 배경
+            # 불투명 배경 — 원문을 완전히 덮음
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(bg_opaque))
-            painter.drawRoundedRect(line.x, line.y, box_w, box_h, 2, 2)
+            painter.drawRect(box_x, line.y, box_w, box_h)
 
-            # 텍스트 렌더링
-            draw_rect = QRect(line.x + pad, line.y + pad, avail_w, avail_h)
+            # 텍스트 영역
+            draw_rect = QRect(box_x + pad, line.y, avail_w, box_h)
 
+            # 이중 외곽선 (바깥 두꺼운 선 + 안쪽 얇은 선)
             if p.outline:
-                outline_color = QColor(*p.outline_color)
-                painter.setPen(QPen(outline_color, 2))
-                for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                outer_color = QColor(*p.outline_color)
+                # 바깥 외곽선 (두꺼움)
+                painter.setPen(QPen(outer_color, 4))
+                for dx, dy in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+                    painter.drawText(
+                        draw_rect.adjusted(dx, dy, dx, dy),
+                        text_flags, line.text,
+                    )
+                # 안쪽 외곽선 (얇음)
+                painter.setPen(QPen(outer_color, 2))
+                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                     painter.drawText(
                         draw_rect.adjusted(dx, dy, dx, dy),
                         text_flags, line.text,
                     )
 
+            # 본문 텍스트
             painter.setPen(QPen(text_color))
             painter.drawText(draw_rect, text_flags, line.text)
 
