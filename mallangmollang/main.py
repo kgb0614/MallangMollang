@@ -88,6 +88,8 @@ class App:
         self._loop_thread: threading.Thread | None = None
         self._running = False
         self._snapshot_running = False
+        self._edit_mode = False
+        self._edit_handles: list = []
 
         self._connect_signals()
 
@@ -98,6 +100,7 @@ class App:
         self.tray.settings_requested.connect(self._on_settings)
         self.tray.region_requested.connect(self._on_region_select)
         self.tray.panel_requested.connect(self._show_panel)
+        self.tray.region_edit_requested.connect(self._on_region_edit)
         self.tray.ocr_preview_requested.connect(self._on_ocr_preview)
         self.tray.debug_copy_requested.connect(self._copy_debug_info)
         self.tray.quit_requested.connect(self._on_quit)
@@ -423,7 +426,10 @@ class App:
             ov.set_snapshot_mode(False)
 
     def _on_dismiss(self):
-        """ESC 키로 모든 오버레이와 영역 표시를 숨깁니다."""
+        """ESC 키로 모든 오버레이와 영역 표시를 숨깁니다. 편집 모드면 종료합니다."""
+        if self._edit_mode:
+            self._exit_edit_mode()
+            return
         self.overlay.hide_translation()
         self.indicator.hide()
         for ov in self._overlays.values():
@@ -439,6 +445,61 @@ class App:
         """특정 영역의 오버레이가 닫혔을 때 해당 인디케이터도 숨깁니다."""
         if region_id in self._indicators:
             self._indicators[region_id].hide()
+
+    def _on_region_edit(self):
+        """영역 편집 모드를 토글합니다."""
+        if self._edit_mode:
+            self._exit_edit_mode()
+        else:
+            self._enter_edit_mode()
+
+    def _enter_edit_mode(self):
+        """영역 편집 모드 진입 — 번역 중지, 핸들 표시."""
+        if self._running:
+            self._stop_translation()
+
+        from mallangmollang.ui.region_editor import RegionHandle
+
+        regions = self.config.get_all_regions()
+        if not regions:
+            self.toast.show("편집할 영역이 없습니다. 먼저 영역을 추가하세요.", "warning")
+            return
+
+        self._edit_mode = True
+        self._edit_handles = []
+        for r in regions:
+            handle = RegionHandle(r["id"], r.get("name", ""), r["rect"])
+            handle.region_changed.connect(self._on_region_handle_changed)
+            handle.region_deleted.connect(self._on_region_handle_deleted)
+            handle.show()
+            self._edit_handles.append(handle)
+
+        self.toast.show("영역 편집 모드 — 드래그로 이동/리사이즈, ✕로 삭제, ESC로 완료", "info", 5000)
+
+    def _exit_edit_mode(self):
+        """영역 편집 모드 종료 — 핸들 숨김, 설정 저장."""
+        self._edit_mode = False
+        for handle in self._edit_handles:
+            handle.hide()
+            handle.deleteLater()
+        self._edit_handles = []
+        self.toast.show("영역 편집 완료", "success")
+
+    def _on_region_handle_changed(self, region_id: int, rect: list[int]):
+        """편집 핸들에서 영역 위치/크기가 변경되었을 때."""
+        self.config.update_region(region_id, rect=rect)
+
+    def _on_region_handle_deleted(self, region_id: int):
+        """편집 핸들에서 영역 삭제가 요청되었을 때."""
+        self.config.remove_region(region_id)
+        # 해당 핸들 제거
+        self._edit_handles = [h for h in self._edit_handles if h.region_id != region_id]
+        # 영역별 오버레이/인디케이터도 정리
+        if region_id in self._overlays:
+            self._overlays.pop(region_id).deleteLater()
+        if region_id in self._indicators:
+            self._indicators.pop(region_id).deleteLater()
+        self.toast.show("영역 삭제됨", "info")
 
     def _on_ocr_preview(self):
         """현재 캡처 영역의 OCR 전처리 결과를 미리보기 창에 표시합니다."""

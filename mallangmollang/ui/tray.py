@@ -40,7 +40,8 @@ class TrayIcon(QObject):
 
     toggle_requested = pyqtSignal()      # 번역 시작/중지
     settings_requested = pyqtSignal()    # 설정 창 열기
-    region_requested = pyqtSignal()      # 영역 재지정
+    region_requested = pyqtSignal()      # 영역 추가
+    region_edit_requested = pyqtSignal() # 영역 편집 모드
     panel_requested = pyqtSignal()       # 컨트롤 패널 표시
     ocr_preview_requested = pyqtSignal() # OCR 미리보기
     debug_copy_requested = pyqtSignal()  # 진단 정보 클립보드 복사
@@ -72,8 +73,11 @@ class TrayIcon(QObject):
         self._toggle_action = menu.addAction("번역 시작")
         self._toggle_action.triggered.connect(self.toggle_requested)
 
-        self._region_action = menu.addAction("영역 재지정")
+        self._region_action = menu.addAction("영역 추가")
         self._region_action.triggered.connect(self.region_requested)
+
+        region_edit_action = menu.addAction("영역 편집")
+        region_edit_action.triggered.connect(self.region_edit_requested)
 
         panel_action = menu.addAction("컨트롤 패널 표시")
         panel_action.triggered.connect(self.panel_requested)
