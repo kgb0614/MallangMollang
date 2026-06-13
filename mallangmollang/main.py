@@ -192,9 +192,8 @@ class App:
 
     def _on_translation_ready(self, text: str, region, region_id: int):
         """번역 결과를 표시 모드에 따라 오버레이 또는 사이드 패널에 보냅니다."""
-        if self.config.get("display.mode", "overlay") == "panel":
-            self.side_panel.add_entry(text)
-        else:
+        self.side_panel.add_entry(text)
+        if self.config.get("display.mode", "overlay") != "panel":
             self._hide_indicator_for(region_id)
             ov = self._get_overlay(region_id)
             ov.show_translation(text, region=region)
@@ -203,11 +202,10 @@ class App:
 
     def _on_lines_ready(self, line_translations, region, region_id: int):
         """줄 단위 번역 결과를 표시 모드에 따라 분기합니다."""
-        if self.config.get("display.mode", "overlay") == "panel":
-            original = "\n".join(lt.line_box.text for lt in line_translations)
-            translated = "\n".join(lt.translated for lt in line_translations)
-            self.side_panel.add_entry(translated, original)
-        else:
+        original = "\n".join(lt.line_box.text for lt in line_translations)
+        translated = "\n".join(lt.translated for lt in line_translations)
+        self.side_panel.add_entry(translated, original)
+        if self.config.get("display.mode", "overlay") != "panel":
             self._hide_indicator_for(region_id)
             from mallangmollang.display.overlay import TranslatedLine
             lines = [
@@ -224,8 +222,7 @@ class App:
             ov = self._get_overlay(region_id)
             ov.show_lines(lines, region=region)
             self._apply_snapshot_overlay_mode_for(ov)
-        translated_text = "\n".join(lt.translated for lt in line_translations)
-        self._copy_to_clipboard(translated_text)
+        self._copy_to_clipboard(translated)
 
     def _hide_indicator_for(self, region_id: int):
         """오버레이 표시 시 해당 영역의 인디케이터를 숨깁니다."""

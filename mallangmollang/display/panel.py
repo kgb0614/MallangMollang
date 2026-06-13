@@ -3,15 +3,25 @@
 오버레이 대신 화면 한쪽에 번역 히스토리를 스크롤 목록으로 표시합니다.
 """
 
+import csv
+from dataclasses import dataclass
 from datetime import datetime
 from html import escape as html_escape
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QLabel, QFrame, QPushButton, QTextBrowser,
+    QLabel, QFrame, QPushButton, QTextBrowser, QFileDialog,
 )
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
+
+
+@dataclass
+class _HistoryEntry:
+    """내보내기용 번역 이력 원본 데이터"""
+    timestamp: str
+    original: str
+    translated: str
 
 
 _MAX_ENTRIES = 50
@@ -65,6 +75,7 @@ class SidePanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._entries: list[QTextBrowser] = []
+        self._history: list[_HistoryEntry] = []
         self._drag_pos: QPoint | None = None
         self._setup_window()
         self._setup_ui()
@@ -95,10 +106,7 @@ class SidePanel(QWidget):
             "color: rgba(190,190,210,220); font-size: 12px; font-weight: bold;"
         )
 
-        clear_btn = QPushButton("지우기")
-        clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_btn.setFixedHeight(22)
-        clear_btn.setStyleSheet("""
+        _small_btn_style = """
             QPushButton {
                 color: rgba(160,160,180,200);
                 background: rgba(50,50,65,180);
@@ -106,7 +114,18 @@ class SidePanel(QWidget):
                 padding: 2px 8px; font-size: 10px;
             }
             QPushButton:hover { background: rgba(70,70,90,200); }
-        """)
+        """
+
+        export_btn = QPushButton("내보내기")
+        export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        export_btn.setFixedHeight(22)
+        export_btn.setStyleSheet(_small_btn_style)
+        export_btn.clicked.connect(self._export_history)
+
+        clear_btn = QPushButton("지우기")
+        clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear_btn.setFixedHeight(22)
+        clear_btn.setStyleSheet(_small_btn_style)
         clear_btn.clicked.connect(self.clear)
 
         close_btn = QPushButton("✕")
@@ -123,6 +142,7 @@ class SidePanel(QWidget):
 
         title_row.addWidget(title)
         title_row.addStretch()
+        title_row.addWidget(export_btn)
         title_row.addWidget(clear_btn)
         title_row.addWidget(close_btn)
 
@@ -164,6 +184,12 @@ class SidePanel(QWidget):
             self._empty_label.hide()
 
         ts = datetime.now().strftime("%H:%M:%S")
+        full_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._history.insert(0, _HistoryEntry(
+            timestamp=full_ts,
+            original=original.strip(),
+            translated=translated.strip(),
+        ))
 
         browser = QTextBrowser()
         browser.setReadOnly(True)
@@ -209,6 +235,8 @@ class SidePanel(QWidget):
             old = self._entries.pop()
             self._list.removeWidget(old)
             old.deleteLater()
+        while len(self._history) > _MAX_ENTRIES:
+            self._history.pop()
 
         # 맨 위로 스크롤
         self._scroll.verticalScrollBar().setValue(0)
@@ -228,6 +256,7 @@ class SidePanel(QWidget):
             self._list.removeWidget(entry)
             entry.deleteLater()
         self._entries.clear()
+        self._history.clear()
         self._empty_label.show()
 
     # 패널 리사이즈 시 모든 항목 높이 재계산
@@ -235,6 +264,46 @@ class SidePanel(QWidget):
         super().resizeEvent(event)
         for entry in self._entries:
             self._fit_height(entry)
+
+    def _export_history(self):
+        """번역 이력을 파일로 내보냅니다 (txt/csv 선택)."""
+        if not self._history:
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "번역 이력 내보내기",
+            f"translation_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "텍스트 파일 (*.txt);;CSV 파일 (*.csv)",
+        )
+        if not path:
+            return
+
+        try:
+            if path.endswith(".csv"):
+                self._export_csv(path)
+            else:
+                self._export_txt(path)
+        except Exception as e:
+            print(f"[SidePanel] 내보내기 실패: {e}")
+
+    def _export_txt(self, path: str):
+        """TXT 형식으로 내보냅니다."""
+        with open(path, "w", encoding="utf-8") as f:
+            for entry in self._history:
+                f.write(f"[{entry.timestamp}]\n")
+                if entry.original:
+                    f.write(f"원문: {entry.original}\n")
+                f.write(f"번역: {entry.translated}\n")
+                f.write("-" * 40 + "\n")
+
+    def _export_csv(self, path: str):
+        """CSV 형식으로 내보냅니다."""
+        with open(path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["시각", "원문", "번역"])
+            for entry in self._history:
+                writer.writerow([entry.timestamp, entry.original, entry.translated])
 
     # 둥근 반투명 배경
     def paintEvent(self, event):
