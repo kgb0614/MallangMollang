@@ -110,6 +110,10 @@ class App:
         # 전역 단축키
         self.hotkeys.toggle_requested.connect(self._on_toggle)
         self.hotkeys.region_requested.connect(self._on_region_select)
+        self.hotkeys.dismiss_requested.connect(self._on_dismiss)
+
+        # 오버레이 자체 닫힘 시그널 (클릭/자동 타이머)
+        self.overlay.dismissed.connect(self._on_overlay_dismissed)
 
     def _is_provider_configured(self) -> bool:
         """현재 프로바이더가 최소한의 설정을 갖추고 있는지 확인합니다."""
@@ -157,6 +161,7 @@ class App:
             self.side_panel.add_entry(text)
         else:
             self.overlay.show_translation(text, region=region)
+            self._apply_snapshot_overlay_mode()
 
     def _on_lines_ready(self, line_translations, region):
         """줄 단위 번역 결과를 표시 모드에 따라 분기합니다."""
@@ -178,6 +183,7 @@ class App:
                 for lt in line_translations
             ]
             self.overlay.show_lines(lines, region=region)
+            self._apply_snapshot_overlay_mode()
 
     def _on_status_changed(self, status: str):
         """파이프라인 상태를 영역 표시 창과 컨트롤 패널에 반영합니다."""
@@ -343,6 +349,24 @@ class App:
                 loop.close()
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _apply_snapshot_overlay_mode(self):
+        """스냅샷 모드일 때 오버레이에 클릭 닫기 + 자동 타이머를 설정합니다."""
+        mode = self.config.get("translation.run_mode", "realtime")
+        if mode == "snapshot":
+            auto_ms = self.config.get("display.snapshot_auto_dismiss_ms", 0)
+            self.overlay.set_snapshot_mode(True, auto_ms)
+        else:
+            self.overlay.set_snapshot_mode(False)
+
+    def _on_dismiss(self):
+        """ESC 키로 오버레이와 영역 표시를 숨깁니다."""
+        self.overlay.hide_translation()
+        self.indicator.hide()
+
+    def _on_overlay_dismissed(self):
+        """오버레이가 스스로 닫혔을 때 (클릭/자동 타이머) 영역 표시도 숨깁니다."""
+        self.indicator.hide()
 
     # ── 시그널 핸들러 ──
 

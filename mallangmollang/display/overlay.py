@@ -16,9 +16,9 @@ import sys
 from dataclasses import dataclass
 
 from PyQt6.QtWidgets import QWidget, QApplication
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QFontMetrics
-from PyQt6.QtCore import QRect
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QFontMetrics, QMouseEvent
+from PyQt6.QtCore import QRect, pyqtSignal
 
 from mallangmollang.display.presets import OverlayPreset, PRESET_DEFAULT
 from mallangmollang.display.area_indicator import _exclude_from_screen_capture
@@ -44,6 +44,8 @@ class OverlayWindow(QWidget):
         overlay.show_lines(lines, region=(100, 200, 800, 400))
     """
 
+    dismissed = pyqtSignal()
+
     def __init__(self, preset: OverlayPreset | None = None, parent=None):
         super().__init__(parent)
         self.preset = preset or PRESET_DEFAULT
@@ -51,6 +53,12 @@ class OverlayWindow(QWidget):
         self._lines: list[TranslatedLine] = []
         self._current_region: tuple[int, int, int, int] | None = None
         self._mode = "line"  # "line" | "block"
+        self._snapshot_mode = False
+
+        # 스냅샷 자동 정리 타이머
+        self._dismiss_timer = QTimer(self)
+        self._dismiss_timer.setSingleShot(True)
+        self._dismiss_timer.timeout.connect(self._auto_dismiss)
 
         self._setup_window()
 
@@ -111,7 +119,41 @@ class OverlayWindow(QWidget):
         if not self.isVisible():
             self.show()
 
+    def set_snapshot_mode(self, enabled: bool, auto_dismiss_ms: int = 0):
+        """스냅샷 모드 설정. 스냅샷이면 클릭으로 닫을 수 있고, 자동 정리 타이머를 시작합니다."""
+        self._snapshot_mode = enabled
+        if enabled:
+            # 클릭 투과 해제 — 클릭으로 오버레이를 닫을 수 있게
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+            if auto_dismiss_ms > 0:
+                self._dismiss_timer.start(auto_dismiss_ms)
+        else:
+            # 실시간 모드: 클릭 투과 복원
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self._dismiss_timer.stop()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """스냅샷 모드에서 클릭하면 오버레이를 닫습니다."""
+        if self._snapshot_mode:
+            self._dismiss()
+        else:
+            super().mousePressEvent(event)
+
+    def _dismiss(self):
+        """오버레이를 닫고 스냅샷 모드를 해제합니다."""
+        self._dismiss_timer.stop()
+        self._snapshot_mode = False
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.hide()
+        self.dismissed.emit()
+
+    def _auto_dismiss(self):
+        """자동 정리 타이머에 의한 닫기."""
+        if self._snapshot_mode:
+            self._dismiss()
+
     def hide_translation(self):
+        self._dismiss_timer.stop()
         self.hide()
 
     def set_preset(self, preset: OverlayPreset):

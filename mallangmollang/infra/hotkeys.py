@@ -36,11 +36,13 @@ class HotkeyManager(QObject):
 
     toggle_requested = pyqtSignal()
     region_requested = pyqtSignal()
+    dismiss_requested = pyqtSignal()
 
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
         self._config = config
         self._listener: keyboard.GlobalHotKeys | None = None
+        self._esc_listener: keyboard.Listener | None = None
 
     def start(self) -> None:
         """단축키 리스닝을 시작합니다."""
@@ -61,11 +63,21 @@ class HotkeyManager(QObject):
         except Exception as e:
             print(f"[HotkeyManager] 단축키 리스너 시작 실패: {e}")
 
+        # ESC 키 리스너 (단일 키이므로 별도 Listener 사용)
+        try:
+            self._esc_listener = keyboard.Listener(on_press=self._on_key_press)
+            self._esc_listener.start()
+        except Exception as e:
+            print(f"[HotkeyManager] ESC 리스너 시작 실패: {e}")
+
     def stop(self) -> None:
         """단축키 리스닝을 중지합니다."""
         if self._listener:
             self._listener.stop()
             self._listener = None
+        if self._esc_listener:
+            self._esc_listener.stop()
+            self._esc_listener = None
 
     def reload(self) -> None:
         """설정 변경 후 단축키를 재등록합니다."""
@@ -78,3 +90,7 @@ class HotkeyManager(QObject):
 
     def _on_region(self) -> None:
         self.region_requested.emit()
+
+    def _on_key_press(self, key) -> None:
+        if key == keyboard.Key.esc:
+            self.dismiss_requested.emit()

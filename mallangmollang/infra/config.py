@@ -80,8 +80,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
     # 표시 설정
     "display": {
-        "mode": "overlay",        # 표시 모드: "overlay" | "panel"
-        "active_preset": "dark",  # 활성 스타일 프리셋
+        "mode": "overlay",                # 표시 모드: "overlay" | "panel"
+        "active_preset": "dark",          # 활성 스타일 프리셋
+        "snapshot_auto_dismiss_ms": 0,    # 스냅샷 자동 정리 (밀리초, 0=비활성)
     },
 
     # 단축키 설정
