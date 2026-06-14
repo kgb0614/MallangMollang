@@ -5,7 +5,7 @@ API 키, 언어, 캡처, 표시, 번역 설정을 탭 구조로 제공합니다.
 
 from PyQt6.QtWidgets import (
     QDialog, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QComboBox, QSpinBox, QCheckBox,
+    QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
     QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QStackedWidget, QTextEdit, QFileDialog, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
@@ -412,6 +412,37 @@ class SettingsWindow(QDialog):
         form.addRow("변경 감지 임계값:", self._hash_threshold)
 
         layout.addWidget(group)
+
+        # ── OCR 전처리 옵션 ──
+        pp_group = QGroupBox("OCR 전처리")
+        pp_form = QFormLayout(pp_group)
+
+        self._pp_brightness = QDoubleSpinBox()
+        self._pp_brightness.setRange(0.5, 2.0)
+        self._pp_brightness.setSingleStep(0.1)
+        self._pp_brightness.setDecimals(1)
+        self._pp_brightness.setValue(1.0)
+        self._pp_brightness.setToolTip("1.0 = 원본. 낮으면 어두워지고, 높으면 밝아집니다.")
+        pp_form.addRow("밝기:", self._pp_brightness)
+
+        self._pp_contrast = QDoubleSpinBox()
+        self._pp_contrast.setRange(0.5, 3.0)
+        self._pp_contrast.setSingleStep(0.1)
+        self._pp_contrast.setDecimals(1)
+        self._pp_contrast.setValue(1.0)
+        self._pp_contrast.setToolTip("1.0 = 원본. 높일수록 명암 차이가 커집니다.")
+        pp_form.addRow("대비:", self._pp_contrast)
+
+        self._pp_grayscale = QCheckBox("흑백 변환 후 OCR 수행")
+        pp_form.addRow("그레이스케일:", self._pp_grayscale)
+
+        pp_note = QLabel("※ OCR 인식률이 낮을 때 조정해보세요. 트레이 > OCR 미리보기로 결과를 확인할 수 있습니다.")
+        pp_note.setStyleSheet("color: gray; font-size: 11px;")
+        pp_note.setWordWrap(True)
+        pp_form.addRow("", pp_note)
+
+        layout.addWidget(pp_group)
+
         layout.addStretch()
         return widget
 
@@ -634,6 +665,11 @@ class SettingsWindow(QDialog):
         self._interval_ms.setValue(c.get("capture.interval_ms", 1500))
         self._hash_threshold.setValue(c.get("detector.hash_threshold", 5))
 
+        # OCR 전처리
+        self._pp_brightness.setValue(c.get("capture.preprocess.brightness", 1.0))
+        self._pp_contrast.setValue(c.get("capture.preprocess.contrast", 1.0))
+        self._pp_grayscale.setChecked(c.get("capture.preprocess.grayscale", False))
+
         # 번역 탭
         run_mode = c.get("translation.run_mode", "realtime")
         rmidx = self._run_mode.findData(run_mode)
@@ -702,6 +738,11 @@ class SettingsWindow(QDialog):
             c.set("capture.window_title", "")
         c.set("capture.interval_ms", self._interval_ms.value())
         c.set("detector.hash_threshold", self._hash_threshold.value())
+
+        # OCR 전처리
+        c.set("capture.preprocess.brightness", self._pp_brightness.value())
+        c.set("capture.preprocess.contrast", self._pp_contrast.value())
+        c.set("capture.preprocess.grayscale", self._pp_grayscale.isChecked())
 
         # 번역
         c.set("translation.run_mode", self._run_mode.currentData())

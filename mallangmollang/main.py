@@ -463,6 +463,26 @@ class App:
         if self.config.get("translation.auto_clipboard", False) and text.strip():
             QApplication.clipboard().setText(text)
 
+    def _apply_ocr_preprocess(self, image) -> "Image.Image":
+        """사용자 설정에 따른 OCR 전처리를 적용합니다 (밝기/대비/그레이스케일)."""
+        from PIL import ImageEnhance
+
+        brightness = self.config.get("capture.preprocess.brightness", 1.0)
+        contrast = self.config.get("capture.preprocess.contrast", 1.0)
+        grayscale = self.config.get("capture.preprocess.grayscale", False)
+
+        if brightness == 1.0 and contrast == 1.0 and not grayscale:
+            return image
+
+        result = image
+        if grayscale:
+            result = result.convert("L").convert("RGB")
+        if brightness != 1.0:
+            result = ImageEnhance.Brightness(result).enhance(brightness)
+        if contrast != 1.0:
+            result = ImageEnhance.Contrast(result).enhance(contrast)
+        return result
+
     def _apply_auto_colors(self, ov: OverlayWindow, image=None):
         """자동 색상 매핑이 활성화되어 있으면 캡처 이미지를 분석하여 오버레이 색상을 설정합니다."""
         if not self.config.get("display.auto_color", False) or image is None:
@@ -673,10 +693,13 @@ class App:
             self.toast.show("캡처 실패", "error")
             return
 
+        # 사용자 전처리 적용 (밝기/대비/그레이스케일)
+        ocr_image = self._apply_ocr_preprocess(capture_result.image)
+
         ocr = OcrEngine()
         lang = self.config.get("language.ocr_lang", "auto")
         original, preprocessed, bbox_overlay, ocr_text = ocr.preview_preprocess(
-            capture_result.image, lang,
+            ocr_image, lang,
         )
 
         dialog = OcrPreviewDialog(original, preprocessed, bbox_overlay, ocr_text)

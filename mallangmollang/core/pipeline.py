@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image
+from PIL import Image, ImageEnhance
 
 from mallangmollang.core.capture import ScreenCapture, CaptureResult
 from mallangmollang.core.detector import ChangeDetector
@@ -219,8 +219,9 @@ class Pipeline:
             )
         else:
             # 경로 A: OCR + LLM (줄 단위)
+            ocr_image = self._apply_user_preprocess(capture_result.image)
             ocr_lang = self.config.get("language.ocr_lang", "auto")
-            line_boxes = self.ocr.extract_lines(capture_result.image, lang=ocr_lang)
+            line_boxes = self.ocr.extract_lines(ocr_image, lang=ocr_lang)
 
             # OCR 신뢰도 필터링 — 노이즈(배경 패턴, 아이콘 등) 제거
             before = len(line_boxes)
@@ -421,3 +422,21 @@ class Pipeline:
         self.stop()
         self.capture.close()
         await self.translator.provider.close()
+
+    def _apply_user_preprocess(self, image: Image.Image) -> Image.Image:
+        """사용자 설정에 따른 OCR 전처리를 적용합니다 (밝기/대비/그레이스케일)."""
+        brightness = self.config.get("capture.preprocess.brightness", 1.0)
+        contrast = self.config.get("capture.preprocess.contrast", 1.0)
+        grayscale = self.config.get("capture.preprocess.grayscale", False)
+
+        if brightness == 1.0 and contrast == 1.0 and not grayscale:
+            return image
+
+        result = image
+        if grayscale:
+            result = result.convert("L").convert("RGB")
+        if brightness != 1.0:
+            result = ImageEnhance.Brightness(result).enhance(brightness)
+        if contrast != 1.0:
+            result = ImageEnhance.Contrast(result).enhance(contrast)
+        return result
