@@ -185,6 +185,12 @@ LLM 프로바이더별 어댑터. 모두 동일한 추상 인터페이스를 구
 - 번역 시 선택된 프로필을 `system_hint`에 텍스트 블록으로 주입
 - 프로필 없이도 기존과 동일하게 동작
 
+**UserDictionary** — 사용자 번역 사전 (`core/user_dict.py`)
+- 원문→번역 쌍 등록: `user_dict.json`으로 영속 저장
+- 완전 일치: LLM 호출 없이 즉시 치환 (비용 절감)
+- 부분 일치: `【강제 용어 사전】` 블록으로 프롬프트에 주입하여 번역어 강제
+- 설정 > "사용자 사전" 탭에서 추가/삭제 관리
+
 ---
 
 ## 3. 데이터 흐름
@@ -229,6 +235,7 @@ mallangmollang/
 │   ├── ocr.py                # OCR 엔진 (extract_text, extract_lines, preview_preprocess)
 │   ├── translator.py         # 번역 엔진 (줄 단위/개별/Vision, 문맥 기억, 프로필 hint)
 │   ├── profiles.py           # 번역 프로필 관리 (LLM 자동 생성, JSON 저장/불러오기)
+│   ├── user_dict.py          # 사용자 번역 사전 (완전/부분 일치, JSON 영속)
 │   ├── cache.py              # 번역 캐시 (LRU, 디스크 영속 저장)
 │   └── pipeline.py           # 파이프라인 오케스트레이터 (LineTranslation, 진단 로그)
 │

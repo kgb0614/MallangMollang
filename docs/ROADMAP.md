@@ -155,19 +155,24 @@ ESC 글로벌 단축키, 스냅샷 모드 클릭 닫기, 자동 타이머 지원
 
 ---
 
-## Phase 3 — 마무리 기능 (현재)
+## Phase 3 — 마무리 기능 ✅ 완료
 
-### 3-1. 사용자 번역 DB ⬜ 예정
+### 3-1. 사용자 번역 DB ✅ 완료
 
-사용자가 "원문 → 번역" 쌍을 등록. LLM 호출 전 완전 일치 시 즉시 치환, 부분 일치 시 프롬프트에 강제 용어로 포함.
-설정 창에 "사용자 사전" 탭 추가.
+- `core/user_dict.py` — `UserDictionary` (JSON 영속 저장, 완전/부분 일치 검색)
+- `pipeline.py` — OCR 후 사전 조회: 완전 일치 줄은 LLM 스킵, 나머지만 번역
+- `translator.py` — `forced_terms` 파라미터 추가, `【강제 용어 사전】` 프롬프트 블록 주입
+- `ui/settings.py` — "사용자 사전" 탭 (테이블 UI + 추가/삭제)
+- 저장 파일: `user_dict.json`
 
 ---
 
-### 3-2. OCR 이미지 전처리 옵션 ⬜ 예정
+### 3-2. OCR 이미지 전처리 옵션 ✅ 완료
 
-밝기/대비/그레이스케일 조정 슬라이더를 설정 > 캡처 탭에 추가.
-캡처 후 OCR 전에 Pillow `ImageEnhance`로 처리. 기존 OCR 미리보기에서 결과 확인.
+- 설정 > 캡처 탭에 밝기(0.5~2.0)/대비(0.5~3.0)/그레이스케일 조정 추가
+- 캡처 후 OCR 전에 Pillow `ImageEnhance`로 처리
+- OCR 미리보기에도 동일 전처리 적용
+- 설정 경로: `capture.preprocess.brightness`, `capture.preprocess.contrast`, `capture.preprocess.grayscale`
 
 ---
 
@@ -221,8 +226,8 @@ Phase 2.5 (오버레이 개선 + 부가기능)
   ✅ 자동 색상 매핑              완료
 
 Phase 3 (마무리 기능)
-  ⬜ 사용자 번역 DB
-  ⬜ OCR 이미지 전처리 옵션
+  ✅ 사용자 번역 DB             완료
+  ✅ OCR 이미지 전처리 옵션      완료
 ```
 
 ---
