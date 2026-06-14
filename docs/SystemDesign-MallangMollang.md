@@ -1,7 +1,7 @@
 # 말랑몰랑 (MallangMollang) — System Design Spec
 
-**작성일:** 2026-06-01 (최종 수정: 2026-06-11)
-**상태:** 승인됨 (구현 반영 업데이트)
+**작성일:** 2026-06-01 (최종 수정: 2026-06-14)
+**상태:** 승인됨 (Phase 2.5까지 반영)
 **관련 문서:** PRD-MallangMollang.md, UserFlow-MallangMollang.md
 
 ---
@@ -99,20 +99,22 @@ LLM 프로바이더별 어댑터. 모두 동일한 추상 인터페이스를 구
 **Overlay** — 오버레이 창
 - PyQt6 투명 윈도우 (FramelessWindowHint + WA_TranslucentBackground)
 - 항상 최상위 (WindowStaysOnTopHint)
-- 마우스 클릭 투과 (WA_TransparentForMouseEvents)
+- 마우스 클릭 투과 (WA_TransparentForMouseEvents). 스냅샷 모드에서는 클릭으로 닫기 가능
 - `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` — mss 캡처에서 자동 제외 (피드백 루프 방지)
 - 두 가지 표시 모드:
-  - **line 모드**: 각 OCR 줄 위치에 불투명 배경 + 번역 텍스트 덮어씌우기 (MORT 스타일). 폰트 자동 축소(최소 8pt) + 박스 높이 자동 확장
+  - **line 모드**: MORT 스타일 — QPainterPath + QPainterPathStroker 이중 외곽선, 폰트 비례 두께 (outer: `font_size * 0.3`, inner: `font_size * 0.12`), near-opaque 배경 (alpha 225), 글자 단위 줄바꿈, 누적 y_offset 겹침 방지
   - **block 모드**: 캡처 영역 전체에 반투명 배경 + 번역 텍스트 (폴백)
+- 자동 색상 매핑: `display/auto_color.py`에서 캡처 이미지 평균 휘도 분석 → 대비 텍스트/외곽선 색상 자동 선택 (opt-in)
 
 **AreaIndicator** — 캡처 영역 표시
 - 캡처 영역 테두리를 실선으로 표시
 - 번역 중 펄스 애니메이션 (투명도 1.0↔0.3, 800ms 주기)
 
-**Panel** — 사이드 패널 (미구현)
-- 화면 한쪽에 고정되는 독립 창
-- 위치(좌/우/상/하)와 크기 조절 가능
-- 번역 히스토리를 스크롤 형태로 표시
+**Panel** — 사이드 패널
+- 화면 한쪽에 고정되는 독립 창 (드래그 이동 가능)
+- QTextBrowser 기반 번역 히스토리 표시 (타임스탬프 + 원문 + 번역)
+- 내보내기 기능: txt/csv 형식으로 번역 이력 저장 (QFileDialog)
+- 오버레이 모드에서도 히스토리 누적 (내보내기 항상 가능)
 
 **Presets** — 스타일 프리셋 관리
 - 프리셋 데이터: 폰트 종류, 크기, 색상, 배경 색상, 투명도, 외곽선
@@ -132,18 +134,28 @@ LLM 프로바이더별 어댑터. 모두 동일한 추상 인터페이스를 구
 - 각 탭이 Config 모듈을 통해 설정을 읽고 저장
 - 번역 프로필 탭: 키워드 자동 생성, 수동 편집 (이름/장르/분위기/용어집/추가지시), 저장/삭제
 
+**ControlPanel** — 컨트롤 패널
+- 플로팅 미니 패널 (시작/중지, 영역 선택, 설정, 종료)
+- 상태 표시 바 (번역 중/대기/오류)
+- 드래그 이동 가능
+
 **Toast** — 알림 토스트
 - 에러 상세 메시지를 화면에 일시적으로 표시
-- 레벨별 색상 구분 (error, info)
-
-**Onboarding** — 온보딩 화면 (미구현)
-- 최초 실행 시 표시
-- 3단계: 소개 → 프로바이더 설정 → 언어 설정
+- 레벨별 색상 구분 (error, warning, info, success)
 
 **RegionSelector** — 영역 선택 UI
 - 전체 화면 반투명 오버레이
 - 마우스 드래그로 직사각형 영역 지정
 - 복수 영역 지정 지원
+
+**RegionEditor** — 영역 편집 핸들
+- 8방향 리사이즈, 드래그 이동
+- 툴바: 번호 레이블 + ▶ 번역 버튼 + ✕ 삭제 버튼
+- 윈도우 추적 모드에서 자동 위치 갱신
+
+**OcrPreview** — OCR 전처리 미리보기
+- 원본 / 전처리 / 바운딩 박스 3장 이미지 표시
+- OCR 텍스트 복사 가능
 
 ### 2.5 Infrastructure
 
@@ -158,9 +170,9 @@ LLM 프로바이더별 어댑터. 모두 동일한 추상 인터페이스를 구
 - pynput 또는 keyboard 라이브러리로 시스템 전역 단축키 등록
 - 다른 프로그램 위에서도 동작
 
-**Crypto** — API 키 암호화 (미구현)
-- API 키를 로컬에 암호화하여 저장
-- 평문 노출 방지
+**Crypto** — API 키 암호화
+- Fernet 대칭 암호화. 머신 고유 정보(MAC+사용자명)에서 PBKDF2로 키 유도
+- 저장 시 자동 암호화, 로드 시 자동 복호화. 기존 평문 키 자동 마이그레이션
 
 ### 2.6 Profiles
 
@@ -212,41 +224,44 @@ Vision 모드에서는 OCR 단계를 건너뛰고, Translator가 캡처 이미�
 ```
 mallangmollang/
 ├── core/                     # 핵심 파이프라인
-│   ├── capture.py            # 화면 캡처 (영역/커서), mss 사용
-│   ├── detector.py           # 변경 감지 (이미지 해시)
-│   ├── ocr.py                # OCR 엔진 (extract_text, extract_lines, 문단 병합, 목록 분리)
-│   ├── translator.py         # 번역 엔진 (줄 단위/개별/Vision, 문맥 기억)
+│   ├── capture.py            # 화면 캡처 (영역/윈도우), mss + pywin32
+│   ├── detector.py           # 변경 감지 (이미지 해시, 영역별 독립)
+│   ├── ocr.py                # OCR 엔진 (extract_text, extract_lines, preview_preprocess)
+│   ├── translator.py         # 번역 엔진 (줄 단위/개별/Vision, 문맥 기억, 프로필 hint)
 │   ├── profiles.py           # 번역 프로필 관리 (LLM 자동 생성, JSON 저장/불러오기)
-│   ├── cache.py              # 번역 캐시 (LRU)
+│   ├── cache.py              # 번역 캐시 (LRU, 디스크 영속 저장)
 │   └── pipeline.py           # 파이프라인 오케스트레이터 (LineTranslation, 진단 로그)
 │
 ├── providers/                # LLM 프로바이더 어댑터
 │   ├── base.py               # 추상 인터페이스 (BaseProvider)
-│   ├── openai.py             # (미구현)
+│   ├── openai.py             # (미구현 — 설정 UI만 존재)
 │   ├── gemini.py             # ✅ AI Studio + Vertex AI
-│   ├── claude.py             # (미구현)
-│   └── ollama.py             # (미구현)
+│   ├── claude.py             # (미구현 — 설정 UI만 존재)
+│   └── ollama.py             # (미구현 — 설정 UI만 존재)
 │
 ├── display/                  # 번역 결과 표시
-│   ├── overlay.py            # 오버레이 (line/block 모드, 폰트 자동 축소)
+│   ├── overlay.py            # 오버레이 (line: QPainterPath 외곽선 / block: 반투명 배경)
 │   ├── area_indicator.py     # 캡처 영역 테두리 + 펄스 애니메이션
-│   ├── panel.py              # 사이드 패널 (미구현)
+│   ├── panel.py              # 사이드 패널 (번역 히스토리 + 내보내기)
+│   ├── auto_color.py         # 자동 색상 매핑 (이미지 휘도 분석)
 │   └── presets.py            # 스타일 프리셋 관리
 │
 ├── ui/                       # 사용자 인터페이스
-│   ├── tray.py               # 시스템 트레이 (진단 복사 포함)
-│   ├── settings.py           # 설정 창 (단축키 탭 포함)
-│   ├── toast.py              # 에러/상태 토스트 알림
-│   ├── onboarding.py         # 온보딩 화면 (미구현)
-│   └── region_selector.py    # 영역 선택 드래그 UI
+│   ├── tray.py               # 시스템 트레이 (진단 복사, OCR 미리보기 포함)
+│   ├── settings.py           # 설정 창 (7탭: 프로바이더/언어/캡처/번역/표시/프로필/단축키)
+│   ├── control_panel.py      # 플로팅 컨트롤 패널 (시작/중지/영역/설정)
+│   ├── toast.py              # 상태 토스트 알림 (4단계 레벨)
+│   ├── region_selector.py    # 영역 선택 드래그 UI
+│   ├── region_editor.py      # 영역 편집 핸들 (리사이즈/이동/삭제/개별 번역)
+│   └── ocr_preview.py        # OCR 전처리 미리보기 대화상자
 │
 ├── infra/                    # 기반 유틸리티
-│   ├── config.py             # 설정 저장/로드 (JSON)
+│   ├── config.py             # 설정 저장/로드 (JSON, 싱글톤, 점 경로 접근)
 │   ├── hotkeys.py            # 글로벌 단축키 (pynput, 재로드 지원)
-│   └── crypto.py             # API 키 암호화 (미구현)
+│   └── crypto.py             # API 키 Fernet 암호화 (머신 고유 키 유도)
 │
 ├── config.json               # 사용자 설정 (자동 생성)
-├── main.py                   # 진입점 (--debug 플래그)
+├── main.py                   # 진입점 (--debug 플래그, 윈도우 추적, 다중 영역)
 └── requirements.txt          # 의존성
 
 tools/                        # 개발/진단 도구 (패키지 외부)
@@ -266,6 +281,8 @@ httpx>=0.25         # 비동기 HTTP 클라이언트
 imagehash>=4.3      # 이미지 해시 (변경 감지)
 pynput>=1.7         # 글로벌 단축키
 cryptography>=41.0  # API 키 암호화
+mss>=9.0            # 화면 캡처
+pywin32>=306        # 윈도우 핸들 조회 (Windows 전용)
 ```
 
 ---
