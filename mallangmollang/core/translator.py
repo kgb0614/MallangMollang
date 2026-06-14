@@ -68,6 +68,7 @@ class Translator:
         self,
         ocr_text: str,
         params: TranslateParams | None = None,
+        forced_terms: dict[str, str] | None = None,
     ) -> TranslationResult:
         """
         OCR 텍스트를 교정하고 번역합니다 (경로 A: OCR + LLM).
@@ -82,7 +83,7 @@ class Translator:
         if params is None:
             params = TranslateParams()
 
-        system_hint = self._build_system_hint(params.system_hint)
+        system_hint = self._build_system_hint(params.system_hint, forced_terms)
         prompt = self._build_text_prompt(ocr_text)
 
         result = await self.provider.translate(
@@ -160,6 +161,7 @@ class Translator:
         self,
         lines: list[str],
         params: TranslateParams | None = None,
+        forced_terms: dict[str, str] | None = None,
     ) -> list[str]:
         """OCR 텍스트를 줄 단위로 번역합니다 (오버레이 1:1 매핑용).
 
@@ -187,7 +189,7 @@ class Translator:
                 max_tokens=long_max_tokens,
                 system_hint=params.system_hint,
             )
-            tr = await self.translate_text(lines[i], long_params)
+            tr = await self.translate_text(lines[i], long_params, forced_terms)
             results[i] = tr.translated
 
         # 짧은 줄: 기존 번호 형식으로 일괄 번역
@@ -197,7 +199,7 @@ class Translator:
             max_tokens = max(params.max_tokens, len(short_lines) * 80 + 256, total_chars * 5 + 512)
             print(f"[Translator] 짧은 줄 {len(short_lines)}개 ({total_chars}자) / max_tokens={max_tokens}")
 
-            system_hint = self._build_line_system_hint(params.system_hint)
+            system_hint = self._build_line_system_hint(params.system_hint, forced_terms)
             prompt = self._build_line_prompt(short_lines)
 
             result = await self.provider.translate(
@@ -227,7 +229,17 @@ class Translator:
 
     # ── 프롬프트 조립 ──
 
-    def _build_system_hint(self, extra_hint: str = "") -> str:
+    @staticmethod
+    def _build_forced_terms_block(forced_terms: dict[str, str] | None) -> str:
+        """강제 용어 사전 프롬프트 블록을 생성합니다."""
+        if not forced_terms:
+            return ""
+        lines = ["\n\n【강제 용어 사전】 — 아래 원문이 텍스트에 포함되면 반드시 해당 번역을 사용하세요:"]
+        for orig, trans in forced_terms.items():
+            lines.append(f"- {orig} → {trans}")
+        return "\n".join(lines)
+
+    def _build_system_hint(self, extra_hint: str = "", forced_terms: dict[str, str] | None = None) -> str:
         """OCR+LLM 경로용 시스템 프롬프트를 조립합니다."""
         target_name = _LANG_NAMES.get(self.target_lang, self.target_lang)
 
@@ -241,6 +253,8 @@ class Translator:
             "[corrected]: 교정된 원문\n"
             "[translated]: 번역 결과"
         )
+
+        hint += self._build_forced_terms_block(forced_terms)
 
         if self._profile_hint:
             hint += self._profile_hint
@@ -304,7 +318,7 @@ class Translator:
 
         return "\n".join(parts)
 
-    def _build_line_system_hint(self, extra_hint: str = "") -> str:
+    def _build_line_system_hint(self, extra_hint: str = "", forced_terms: dict[str, str] | None = None) -> str:
         """줄 단위 번역용 시스템 프롬프트를 조립합니다."""
         target_name = _LANG_NAMES.get(self.target_lang, self.target_lang)
 
@@ -332,6 +346,8 @@ class Translator:
             "- 원문이 긴 줄은 번역도 반드시 끝까지 완전히 번역하세요. 절대 요약하거나 중간에 생략하지 마세요.\n"
             "- 각 번호의 번역 길이는 원문 길이에 비례해야 합니다."
         )
+
+        hint += self._build_forced_terms_block(forced_terms)
 
         if self._profile_hint:
             hint += self._profile_hint

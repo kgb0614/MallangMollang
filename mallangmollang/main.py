@@ -24,12 +24,14 @@ from mallangmollang.ui.tray import TrayIcon
 from mallangmollang.ui.settings import SettingsWindow
 from mallangmollang.ui.region_selector import RegionSelector
 from mallangmollang.core.profiles import ProfileManager
+from mallangmollang.core.user_dict import UserDictionary
 from mallangmollang.ui.control_panel import ControlPanel
 from mallangmollang.ui.toast import ToastManager
 
 
 # 캐시 파일 경로 (config.json과 동일 위치)
 _CACHE_PATH = Path(__file__).parent.parent / "translation_cache.json"
+_DICT_PATH = Path(__file__).parent.parent / "user_dict.json"
 
 
 class _Bridge(QObject):
@@ -59,6 +61,10 @@ class App:
             max_size=self.config.get("cache.max_size", 100)
         )
         self.cache.load(_CACHE_PATH)
+
+        # 사용자 번역 사전
+        self.user_dict = UserDictionary()
+        self.user_dict.load(_DICT_PATH)
 
         # 컴포넌트 초기화 — 다중 영역용 딕셔너리 (region_id → 위젯)
         self._overlays: dict[int, OverlayWindow] = {}
@@ -152,7 +158,7 @@ class App:
         if not self._is_provider_configured():
             return None
 
-        pipeline = Pipeline.from_config(self.config, cache=self.cache)
+        pipeline = Pipeline.from_config(self.config, cache=self.cache, user_dict=self.user_dict)
 
         def on_result(result):
             region_tuple = result.capture.region
@@ -703,7 +709,8 @@ class App:
             except Exception:
                 pass
 
-        win = SettingsWindow(self.config, profile_manager=self.profile_manager)
+        win = SettingsWindow(self.config, profile_manager=self.profile_manager,
+                             user_dict=self.user_dict)
         saved = [False]
 
         def on_saved():

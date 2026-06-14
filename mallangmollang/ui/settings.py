@@ -14,6 +14,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from mallangmollang.infra.config import Config
 from mallangmollang.core.profiles import ProfileManager, TranslationProfile
+from mallangmollang.core.user_dict import UserDictionary
 
 
 class SettingsWindow(QDialog):
@@ -32,10 +33,12 @@ class SettingsWindow(QDialog):
 
     settings_saved = pyqtSignal()   # 설정 저장 완료 시
 
-    def __init__(self, config: Config, profile_manager: ProfileManager | None = None, parent=None):
+    def __init__(self, config: Config, profile_manager: ProfileManager | None = None,
+                 user_dict: UserDictionary | None = None, parent=None):
         super().__init__(parent)
         self.config = config
         self._profile_manager = profile_manager or ProfileManager()
+        self._user_dict = user_dict
         self.setWindowTitle("말랑몰랑 설정")
         self.setMinimumWidth(520)
         self.setModal(True)
@@ -53,6 +56,7 @@ class SettingsWindow(QDialog):
         self._tabs.addTab(self._build_translation_tab(), "번역")
         self._tabs.addTab(self._build_display_tab(), "표시")
         self._tabs.addTab(self._build_profile_tab(), "번역 프로필")
+        self._tabs.addTab(self._build_user_dict_tab(), "사용자 사전")
         self._tabs.addTab(self._build_hotkeys_tab(), "단축키")
         layout.addWidget(self._tabs)
 
@@ -717,6 +721,12 @@ class SettingsWindow(QDialog):
         c.set("hotkeys.toggle_translation", toggle_key)
         c.set("hotkeys.select_region", region_key)
 
+        # 사용자 사전 저장
+        if self._user_dict:
+            entries = self._get_dict_entries_from_table()
+            self._user_dict.set_all(entries)
+            self._user_dict.save()
+
         # 번역 프로필: 활성 프로필 이름 저장
         active_profile = self._profile_select.currentText()
         c.set("translation.active_profile", active_profile if active_profile != "(없음)" else "")
@@ -724,6 +734,95 @@ class SettingsWindow(QDialog):
         c.save()
         self.settings_saved.emit()
         self.accept()
+
+    # ── 사용자 사전 탭 ──
+
+    def _build_user_dict_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        desc = QLabel(
+            "원문→번역 쌍을 등록하면 번역 시 자동으로 적용됩니다.\n"
+            "• 완전 일치: LLM 호출 없이 즉시 치환 (비용 절감)\n"
+            "• 부분 일치: 프롬프트에 강제 용어로 포함"
+        )
+        desc.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 4px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        group = QGroupBox("사전 항목")
+        group_layout = QVBoxLayout(group)
+
+        self._dict_table = QTableWidget(0, 2)
+        self._dict_table.setHorizontalHeaderLabels(["원문", "번역"])
+        self._dict_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._dict_table.setMinimumHeight(200)
+        group_layout.addWidget(self._dict_table)
+
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("+ 추가")
+        add_btn.clicked.connect(self._add_dict_row)
+        del_btn = QPushButton("- 삭제")
+        del_btn.clicked.connect(self._del_dict_row)
+        btn_layout.addWidget(add_btn)
+        btn_layout.addWidget(del_btn)
+        btn_layout.addStretch()
+
+        self._dict_count_label = QLabel("0개 항목")
+        self._dict_count_label.setStyleSheet("color: gray; font-size: 11px;")
+        btn_layout.addWidget(self._dict_count_label)
+
+        group_layout.addLayout(btn_layout)
+        layout.addWidget(group)
+
+        layout.addStretch()
+
+        # 사전 데이터 로드
+        self._load_dict_table()
+
+        return tab
+
+    def _load_dict_table(self):
+        """사용자 사전 데이터를 테이블에 채웁니다."""
+        self._dict_table.setRowCount(0)
+        if self._user_dict:
+            for orig, trans in self._user_dict.get_all():
+                row = self._dict_table.rowCount()
+                self._dict_table.insertRow(row)
+                self._dict_table.setItem(row, 0, QTableWidgetItem(orig))
+                self._dict_table.setItem(row, 1, QTableWidgetItem(trans))
+        self._update_dict_count()
+
+    def _add_dict_row(self):
+        row = self._dict_table.rowCount()
+        self._dict_table.insertRow(row)
+        self._dict_table.setItem(row, 0, QTableWidgetItem(""))
+        self._dict_table.setItem(row, 1, QTableWidgetItem(""))
+        self._dict_table.setCurrentCell(row, 0)
+        self._dict_table.editItem(self._dict_table.item(row, 0))
+        self._update_dict_count()
+
+    def _del_dict_row(self):
+        row = self._dict_table.currentRow()
+        if row >= 0:
+            self._dict_table.removeRow(row)
+            self._update_dict_count()
+
+    def _update_dict_count(self):
+        count = self._dict_table.rowCount()
+        self._dict_count_label.setText(f"{count}개 항목")
+
+    def _get_dict_entries_from_table(self) -> list[tuple[str, str]]:
+        """테이블에서 (원문, 번역) 목록을 추출합니다."""
+        entries = []
+        for row in range(self._dict_table.rowCount()):
+            src_item = self._dict_table.item(row, 0)
+            dst_item = self._dict_table.item(row, 1)
+            src = src_item.text().strip() if src_item else ""
+            dst = dst_item.text().strip() if dst_item else ""
+            if src and dst:
+                entries.append((src, dst))
+        return entries
 
     # ── 번역 프로필 탭 ──
 

@@ -16,6 +16,7 @@ from mallangmollang.core.detector import ChangeDetector
 from mallangmollang.core.cache import TranslationCache
 from mallangmollang.core.ocr import OcrEngine, OcrResult, LineBox
 from mallangmollang.core.translator import Translator
+from mallangmollang.core.user_dict import UserDictionary
 from mallangmollang.infra.config import Config
 from mallangmollang.providers.base import TranslationResult
 
@@ -69,6 +70,7 @@ class Pipeline:
         config: Config,
         detector: ChangeDetector | None = None,
         cache: TranslationCache | None = None,
+        user_dict: UserDictionary | None = None,
     ):
         self.capture = capture
         self.ocr = ocr
@@ -76,6 +78,7 @@ class Pipeline:
         self.config = config
         self.detector = detector
         self.cache = cache
+        self.user_dict = user_dict
 
         self._running = False
         self._on_result: OnResultCallback | None = None
@@ -93,6 +96,7 @@ class Pipeline:
         cls,
         config: Config,
         cache: TranslationCache | None = None,
+        user_dict: UserDictionary | None = None,
     ) -> "Pipeline":
         """Config 설정으로 파이프라인을 구성합니다.
 
@@ -124,6 +128,7 @@ class Pipeline:
                 threshold=config.get("detector.hash_threshold", 5)
             ),
             cache=cache,
+            user_dict=user_dict,
         )
 
     def on_result(self, callback: OnResultCallback):
@@ -264,9 +269,39 @@ class Pipeline:
                         self._on_result(pipeline_result)
                     return pipeline_result
 
-            # 5. LLM 줄 단위 번역
+            # 5. 사용자 사전 적용 + LLM 줄 단위 번역
             line_texts = [lb.text for lb in line_boxes]
-            translated_lines = await self.translator.translate_lines(line_texts)
+
+            exact_map: dict[int, str] = {}
+            forced_terms: dict[str, str] = {}
+            if self.user_dict and self.user_dict.count > 0:
+                exact_map, forced_terms = self.user_dict.apply_to_lines(line_texts)
+                if exact_map:
+                    print(f"[Pipeline] 사용자 사전: {len(exact_map)}줄 완전 일치")
+                if forced_terms:
+                    print(f"[Pipeline] 사용자 사전: {len(forced_terms)}개 강제 용어")
+
+            # 완전 일치하지 않은 줄만 LLM에 전달
+            lines_to_translate = [
+                (i, line_texts[i]) for i in range(len(line_texts)) if i not in exact_map
+            ]
+
+            if lines_to_translate:
+                llm_lines = [text for _, text in lines_to_translate]
+                llm_results = await self.translator.translate_lines(
+                    llm_lines, forced_terms=forced_terms or None,
+                )
+                translated_lines = [""] * len(line_texts)
+                for idx, trans in exact_map.items():
+                    translated_lines[idx] = trans
+                for (orig_idx, _), trans in zip(lines_to_translate, llm_results):
+                    translated_lines[orig_idx] = trans
+            else:
+                # 모든 줄이 사전에서 해결됨 — LLM 호출 불필요
+                print("[Pipeline] 모든 줄 사용자 사전 일치 → LLM 스킵")
+                translated_lines = [""] * len(line_texts)
+                for idx, trans in exact_map.items():
+                    translated_lines[idx] = trans
 
             # 진단 정보 조립 (전체 텍스트, 잘림 없음)
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
