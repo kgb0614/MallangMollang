@@ -1,0 +1,54 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Tesseract OCR
+        run: choco install tesseract -y
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build exe
+        run: pyinstaller mallangmollang.spec --noconfirm
+
+      - name: Create release zip
+        run: Compress-Archive -Path dist\MallangMollang\* -DestinationPath MallangMollang-${{ github.ref_name }}.zip
+        shell: pwsh
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MallangMollang-${{ github.ref_name }}.zip
+          body: |
+            ## 말랑몰랑 ${{ github.ref_name }}
+
+            ### 설치 방법
+            1. zip 파일을 다운로드하고 원하는 폴더에 압축 해제
+            2. [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) 설치 (PATH에 추가)
+            3. `MallangMollang.exe` 실행
+            4. 설정 창에서 Gemini API 키 입력
+
+            ### 사전 요구사항
+            - Tesseract OCR ([다운로드](https://github.com/UB-Mannheim/tesseract/wiki))
+            - Google Gemini API 키 ([발급](https://aistudio.google.com/apikey))
+          generate_release_notes: true
