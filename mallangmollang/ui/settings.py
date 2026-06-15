@@ -16,6 +16,247 @@ from mallangmollang.infra.config import Config
 from mallangmollang.core.profiles import ProfileManager, TranslationProfile
 from mallangmollang.core.user_dict import UserDictionary
 
+# 컨트롤 패널과 톤을 맞춘 다크 테마 스타일시트
+_DARK_STYLESHEET = """
+    QDialog {
+        background-color: #1e1e28;
+        color: #d0d0e0;
+    }
+
+    /* ── 탭 위젯 ── */
+    QTabWidget::pane {
+        border: 1px solid #35354a;
+        background-color: #1e1e28;
+        border-top: none;
+    }
+    QTabBar::tab {
+        background-color: #26263a;
+        color: #8888a0;
+        padding: 7px 14px;
+        border: 1px solid #35354a;
+        border-bottom: none;
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+        margin-right: 1px;
+        font-size: 12px;
+    }
+    QTabBar::tab:selected {
+        background-color: #1e1e28;
+        color: #d0d0e0;
+        border-bottom: 2px solid #3a8fd4;
+    }
+    QTabBar::tab:hover:!selected {
+        background-color: #2e2e44;
+        color: #b0b0c8;
+    }
+
+    /* ── 그룹 박스 ── */
+    QGroupBox {
+        font-size: 12px;
+        font-weight: bold;
+        color: #a8a8c0;
+        border: 1px solid #30304a;
+        border-radius: 6px;
+        margin-top: 14px;
+        padding: 18px 10px 10px 10px;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        padding: 2px 10px;
+    }
+
+    /* ── 레이블 ── */
+    QLabel {
+        color: #b0b0c8;
+        font-size: 12px;
+    }
+
+    /* ── 입력 필드 ── */
+    QLineEdit, QTextEdit {
+        background-color: #26263a;
+        color: #d0d0e0;
+        border: 1px solid #38384e;
+        border-radius: 4px;
+        padding: 5px 8px;
+        font-size: 12px;
+        selection-background-color: #2a6baa;
+    }
+    QLineEdit:focus, QTextEdit:focus {
+        border-color: #4a80c0;
+    }
+    QLineEdit:disabled, QTextEdit:disabled {
+        background-color: #1a1a24;
+        color: #606078;
+    }
+
+    /* ── 드롭다운 ── */
+    QComboBox {
+        background-color: #26263a;
+        color: #d0d0e0;
+        border: 1px solid #38384e;
+        border-radius: 4px;
+        padding: 5px 8px;
+        font-size: 12px;
+        min-height: 18px;
+    }
+    QComboBox:hover { border-color: #4a6090; }
+    QComboBox::drop-down {
+        border: none;
+        width: 22px;
+    }
+    QComboBox QAbstractItemView {
+        background-color: #24243a;
+        color: #d0d0e0;
+        selection-background-color: #2a6baa;
+        border: 1px solid #38384e;
+        outline: none;
+    }
+
+    /* ── 숫자 입력 ── */
+    QSpinBox, QDoubleSpinBox {
+        background-color: #26263a;
+        color: #d0d0e0;
+        border: 1px solid #38384e;
+        border-radius: 4px;
+        padding: 4px 6px;
+        font-size: 12px;
+    }
+    QSpinBox:focus, QDoubleSpinBox:focus { border-color: #4a80c0; }
+    QSpinBox::up-button, QDoubleSpinBox::up-button,
+    QSpinBox::down-button, QDoubleSpinBox::down-button {
+        background-color: #30304a;
+        border: none;
+        width: 16px;
+    }
+    QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+    QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+        background-color: #3c3c58;
+    }
+
+    /* ── 체크박스 ── */
+    QCheckBox {
+        color: #b0b0c8;
+        font-size: 12px;
+        spacing: 6px;
+    }
+    QCheckBox::indicator {
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        border: 1px solid #38384e;
+        background-color: #26263a;
+    }
+    QCheckBox::indicator:checked {
+        background-color: #2a6baa;
+        border-color: #3a80c0;
+    }
+    QCheckBox::indicator:hover {
+        border-color: #4a6090;
+    }
+
+    /* ── 버튼 ── */
+    QPushButton {
+        background-color: #30304a;
+        color: #d0d0e0;
+        border: 1px solid #3a3a52;
+        border-radius: 5px;
+        padding: 6px 16px;
+        font-size: 12px;
+    }
+    QPushButton:hover {
+        background-color: #3a3a58;
+        border-color: #4a4a62;
+    }
+    QPushButton:pressed {
+        background-color: #26263e;
+    }
+    QPushButton:default {
+        background-color: #1a6bbf;
+        border-color: #2878d0;
+        color: #e8e8f0;
+    }
+    QPushButton:default:hover {
+        background-color: #2478cc;
+    }
+    QPushButton:disabled {
+        background-color: #22222e;
+        color: #505068;
+        border-color: #2a2a3a;
+    }
+
+    /* ── 테이블 ── */
+    QTableWidget {
+        background-color: #222234;
+        alternate-background-color: #262640;
+        color: #d0d0e0;
+        border: 1px solid #35354a;
+        gridline-color: #30304a;
+        selection-background-color: #2a5090;
+        font-size: 12px;
+    }
+    QTableWidget::item {
+        padding: 4px;
+    }
+    QHeaderView::section {
+        background-color: #2a2a42;
+        color: #a0a0b8;
+        border: none;
+        border-right: 1px solid #35354a;
+        border-bottom: 1px solid #35354a;
+        padding: 5px 8px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+
+    /* ── 스크롤바 ── */
+    QScrollBar:vertical {
+        background: #1e1e28;
+        width: 8px;
+        border: none;
+    }
+    QScrollBar::handle:vertical {
+        background: #3a3a54;
+        border-radius: 4px;
+        min-height: 24px;
+    }
+    QScrollBar::handle:vertical:hover { background: #4a4a64; }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+        height: 0;
+    }
+    QScrollBar:horizontal {
+        background: #1e1e28;
+        height: 8px;
+        border: none;
+    }
+    QScrollBar::handle:horizontal {
+        background: #3a3a54;
+        border-radius: 4px;
+        min-width: 24px;
+    }
+    QScrollBar::handle:horizontal:hover { background: #4a4a64; }
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+        width: 0;
+    }
+
+    /* ── 툴팁 ── */
+    QToolTip {
+        background-color: #2a2a40;
+        color: #d0d0e0;
+        border: 1px solid #3a3a52;
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    /* ── 메시지 박스 ── */
+    QMessageBox {
+        background-color: #1e1e28;
+    }
+    QMessageBox QLabel {
+        color: #d0d0e0;
+    }
+"""
+
 
 class SettingsWindow(QDialog):
     """
@@ -42,6 +283,7 @@ class SettingsWindow(QDialog):
         self.setWindowTitle("말랑몰랑 설정")
         self.setMinimumWidth(520)
         self.setModal(True)
+        self.setStyleSheet(_DARK_STYLESHEET)
 
         self._build_ui()
         self._load_values()
