@@ -1,9 +1,12 @@
 name: Build & Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '릴리즈 버전 (예: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 jobs:
   build-windows:
@@ -32,15 +35,17 @@ jobs:
         run: pyinstaller mallangmollang.spec --noconfirm
 
       - name: Create release zip
-        run: Compress-Archive -Path dist\MallangMollang\* -DestinationPath MallangMollang-${{ github.ref_name }}.zip
+        run: Compress-Archive -Path dist\MallangMollang\* -DestinationPath MallangMollang-${{ github.event.inputs.version }}.zip
         shell: pwsh
 
-      - name: Upload Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: MallangMollang-${{ github.ref_name }}.zip
+          tag_name: ${{ github.event.inputs.version }}
+          name: 말랑몰랑 ${{ github.event.inputs.version }}
+          files: MallangMollang-${{ github.event.inputs.version }}.zip
           body: |
-            ## 말랑몰랑 ${{ github.ref_name }}
+            ## 말랑몰랑 ${{ github.event.inputs.version }}
 
             ### 설치 방법
             1. zip 파일을 다운로드하고 원하는 폴더에 압축 해제
