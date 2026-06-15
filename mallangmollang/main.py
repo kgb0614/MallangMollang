@@ -126,6 +126,12 @@ class App:
         self.panel.region_requested.connect(self._on_region_select)
         self.panel.quit_requested.connect(self._on_quit)
 
+        # 컨트롤 패널 빠른 설정 시그널
+        self.panel.mode_changed.connect(self._on_quick_mode_changed)
+        self.panel.display_changed.connect(self._on_quick_display_changed)
+        self.panel.clipboard_toggled.connect(self._on_quick_clipboard_toggled)
+        self.panel.ocr_preview_requested.connect(self._on_ocr_preview)
+
         self.region_selector.region_selected.connect(self._on_region_selected)
         self.region_selector.selection_cancelled.connect(self._on_region_cancelled)
 
@@ -770,10 +776,47 @@ class App:
         else:
             self.side_panel.hide()
 
+        # 빠른 설정 패널 동기화
+        self._sync_panel_quick_settings()
+
         # 윈도우 추적 재시작 (설정 변경 반영)
         self._start_window_tracking()
         if self._is_window_mode():
             self._update_handle_positions()
+
+    def _sync_panel_quick_settings(self):
+        """컨트롤 패널의 빠른 설정을 현재 Config와 동기화합니다."""
+        self.panel.set_quick_settings(
+            mode=self.config.get("translation.run_mode", "realtime"),
+            display=self.config.get("display.mode", "overlay"),
+            clipboard=self.config.get("translation.auto_clipboard", False),
+        )
+
+    def _on_quick_mode_changed(self, mode: str):
+        """패널에서 번역 모드가 변경되었을 때."""
+        was_running = self._running
+        if was_running:
+            self._stop_translation()
+        self.config.set("translation.run_mode", mode)
+        self.panel.set_mode(mode)
+        if was_running and mode == "realtime":
+            self.pipeline = None
+            self._start_translation()
+
+    def _on_quick_display_changed(self, display: str):
+        """패널에서 표시 모드가 변경되었을 때."""
+        self.config.set("display.mode", display)
+        if display == "panel":
+            self.overlay.hide_translation()
+            for ov in self._overlays.values():
+                ov.hide_translation()
+            self.side_panel.show()
+        else:
+            self.side_panel.hide()
+
+    def _on_quick_clipboard_toggled(self, checked: bool):
+        """패널에서 클립보드 자동 복사가 토글되었을 때."""
+        self.config.set("translation.auto_clipboard", checked)
 
     def _on_region_select(self):
         """영역 선택 UI를 시작합니다. 패널을 숨겨서 간섭을 방지합니다."""
@@ -854,6 +897,7 @@ class App:
         self._init_panel_position()
         mode = self.config.get("translation.run_mode", "realtime")
         self.panel.set_mode(mode)
+        self._sync_panel_quick_settings()
         self.panel.show()
         self.hotkeys.start()
 

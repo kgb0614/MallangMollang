@@ -6,6 +6,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMenu,
+    QComboBox, QCheckBox, QFrame,
 )
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen
@@ -14,6 +15,35 @@ _BG_COLOR    = QColor(28, 28, 34, 225)
 _BORDER_COLOR = QColor(65, 65, 80, 200)
 _PANEL_WIDTH  = 210
 _CORNER_RADIUS = 10
+
+_COMBO_STYLE = """
+    QComboBox {
+        background-color: rgba(50, 50, 65, 220);
+        color: rgba(210, 210, 220, 230);
+        border: 1px solid rgba(75, 75, 90, 200);
+        border-radius: 4px;
+        padding: 3px 6px;
+        font-size: 11px;
+    }
+    QComboBox:hover { border-color: rgba(100, 100, 120, 220); }
+    QComboBox::drop-down { border: none; width: 18px; }
+    QComboBox QAbstractItemView {
+        background-color: rgba(40, 40, 55, 245);
+        color: rgba(210, 210, 220, 230);
+        selection-background-color: rgba(30, 100, 180, 200);
+        border: 1px solid rgba(75, 75, 90, 200);
+    }
+"""
+
+_CHECK_STYLE = """
+    QCheckBox {
+        color: rgba(170, 170, 185, 200);
+        font-size: 11px;
+        spacing: 5px;
+    }
+"""
+
+_LABEL_STYLE = "color: rgba(170,170,185,200); font-size: 11px;"
 
 
 def _shift_hex(hex_color: str, delta: int) -> str:
@@ -59,21 +89,24 @@ class ControlPanel(QWidget):
     화면에 상주하는 플로팅 컨트롤 패널.
 
     시그널:
-        toggle_requested   — 번역 시작/중지
-        region_requested   — 영역 재지정
-        settings_requested — 설정 창 열기
-        quit_requested     — 앱 종료 (우클릭 메뉴)
-
-    사용 예시:
-        panel = ControlPanel()
-        panel.toggle_requested.connect(app.on_toggle)
-        panel.show()
+        toggle_requested      — 번역 시작/중지
+        region_requested      — 영역 재지정
+        settings_requested    — 설정 창 열기
+        quit_requested        — 앱 종료 (우클릭 메뉴)
+        mode_changed(str)     — 번역 모드 변경 ("realtime" | "snapshot")
+        display_changed(str)  — 표시 모드 변경 ("overlay" | "panel")
+        clipboard_toggled(bool) — 클립보드 자동 복사 토글
+        ocr_preview_requested — OCR 미리보기
     """
 
-    toggle_requested   = pyqtSignal()
-    region_requested   = pyqtSignal()
-    settings_requested = pyqtSignal()
-    quit_requested     = pyqtSignal()
+    toggle_requested      = pyqtSignal()
+    region_requested      = pyqtSignal()
+    settings_requested    = pyqtSignal()
+    quit_requested        = pyqtSignal()
+    mode_changed          = pyqtSignal(str)
+    display_changed       = pyqtSignal(str)
+    clipboard_toggled     = pyqtSignal(bool)
+    ocr_preview_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -152,9 +185,100 @@ class ControlPanel(QWidget):
             "color: rgba(90,190,255,200); font-size: 10px; padding-top: 2px;"
         )
 
+        # ── 더보기 토글 ──
+        self._expand_btn = QPushButton("▼ 더보기")
+        self._expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._expand_btn.setStyleSheet("""
+            QPushButton {
+                color: rgba(120,120,140,180);
+                background: transparent;
+                border: none;
+                font-size: 10px;
+                padding: 1px 0;
+            }
+            QPushButton:hover { color: rgba(180,180,200,220); }
+        """)
+        self._expand_btn.clicked.connect(self._toggle_expand)
+
+        # ── 빠른 설정 영역 (접힘) ──
+        self._extra_widget = QWidget()
+        self._extra_widget.setVisible(False)
+        extra = QVBoxLayout(self._extra_widget)
+        extra.setContentsMargins(2, 2, 2, 0)
+        extra.setSpacing(5)
+
+        # 구분선
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet("color: rgba(65, 65, 80, 150);")
+        extra.addWidget(line)
+
+        # 번역 모드
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(6)
+        mode_lbl = QLabel("모드:")
+        mode_lbl.setStyleSheet(_LABEL_STYLE)
+        mode_lbl.setFixedWidth(34)
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItem("실시간", "realtime")
+        self._mode_combo.addItem("스냅샷", "snapshot")
+        self._mode_combo.setStyleSheet(_COMBO_STYLE)
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_combo_changed)
+        mode_row.addWidget(mode_lbl)
+        mode_row.addWidget(self._mode_combo)
+        extra.addLayout(mode_row)
+
+        # 표시 모드
+        disp_row = QHBoxLayout()
+        disp_row.setSpacing(6)
+        disp_lbl = QLabel("표시:")
+        disp_lbl.setStyleSheet(_LABEL_STYLE)
+        disp_lbl.setFixedWidth(34)
+        self._display_combo = QComboBox()
+        self._display_combo.addItem("오버레이", "overlay")
+        self._display_combo.addItem("사이드 패널", "panel")
+        self._display_combo.setStyleSheet(_COMBO_STYLE)
+        self._display_combo.currentIndexChanged.connect(self._on_display_combo_changed)
+        disp_row.addWidget(disp_lbl)
+        disp_row.addWidget(self._display_combo)
+        extra.addLayout(disp_row)
+
+        # 클립보드 자동 복사
+        self._clipboard_check = QCheckBox("클립보드 자동 복사")
+        self._clipboard_check.setStyleSheet(_CHECK_STYLE)
+        self._clipboard_check.toggled.connect(self.clipboard_toggled)
+        extra.addWidget(self._clipboard_check)
+
+        # OCR 미리보기 버튼
+        ocr_btn = _make_btn("🔍 OCR 미리보기", "#38384a")
+        ocr_btn.clicked.connect(self.ocr_preview_requested)
+        extra.addWidget(ocr_btn)
+
+        # ── 루트에 조립 ──
         root.addLayout(title_row)
         root.addLayout(btn_row)
         root.addWidget(self._status_lbl)
+        root.addWidget(self._expand_btn)
+        root.addWidget(self._extra_widget)
+
+    # ── 더보기 토글 ──
+
+    def _toggle_expand(self):
+        """빠른 설정 영역을 펼치거나 접습니다."""
+        visible = not self._extra_widget.isVisible()
+        self._extra_widget.setVisible(visible)
+        self._expand_btn.setText("▲ 접기" if visible else "▼ 더보기")
+        self.adjustSize()
+
+    def _on_mode_combo_changed(self, index: int):
+        mode = self._mode_combo.currentData()
+        if mode:
+            self.mode_changed.emit(mode)
+
+    def _on_display_combo_changed(self, index: int):
+        display = self._display_combo.currentData()
+        if display:
+            self.display_changed.emit(display)
 
     # ── 상태 갱신 ──
 
@@ -195,6 +319,24 @@ class ControlPanel(QWidget):
         self._status_lbl.setStyleSheet(
             f"color: {color}; font-size: 10px; padding-top: 2px;"
         )
+
+    def set_quick_settings(self, mode: str, display: str, clipboard: bool) -> None:
+        """빠른 설정 값을 외부에서 동기화합니다 (설정 창 닫힌 후 등)."""
+        self._mode_combo.blockSignals(True)
+        idx = self._mode_combo.findData(mode)
+        if idx >= 0:
+            self._mode_combo.setCurrentIndex(idx)
+        self._mode_combo.blockSignals(False)
+
+        self._display_combo.blockSignals(True)
+        idx = self._display_combo.findData(display)
+        if idx >= 0:
+            self._display_combo.setCurrentIndex(idx)
+        self._display_combo.blockSignals(False)
+
+        self._clipboard_check.blockSignals(True)
+        self._clipboard_check.setChecked(clipboard)
+        self._clipboard_check.blockSignals(False)
 
     # ── 배경 렌더링 ──
 
