@@ -111,6 +111,20 @@ python mallangmollang/main.py
 | 사용자 사전 | 원문→번역 용어 등록/삭제 |
 | 단축키 | 글로벌 단축키 커스터마이징 |
 
+## 빌드 (exe 배포)
+
+소스에서 직접 실행하지 않고 exe로 배포하려면:
+
+```bash
+# build.bat를 더블클릭하거나 명령 프롬프트에서 실행
+build.bat
+```
+
+빌드가 완료되면 `dist\MallangMollang\` 폴더에 `MallangMollang.exe`가 생성됩니다.
+이 폴더 전체를 zip으로 압축하여 배포하면 됩니다.
+
+> **참고:** 실행하려면 Tesseract OCR이 별도로 설치되어 있어야 합니다.
+
 ## 기술 스택
 
 Python 3.11+ · PyQt6 · Tesseract · httpx · Pillow · OpenCV · imagehash · pynput · cryptography · mss · pywin32
